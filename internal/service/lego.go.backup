@@ -1,0 +1,651 @@
+package service
+
+import (
+	"archive/zip"
+	"bytes"
+	"context"
+	"crypto"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"math/big"
+	"strings"
+	"time"
+
+	"github.com/imkerbos/ACME-Console/internal/acme"
+	"github.com/imkerbos/ACME-Console/internal/config"
+	internalCrypto "github.com/imkerbos/ACME-Console/internal/crypto"
+	"github.com/imkerbos/ACME-Console/internal/model"
+	"gorm.io/gorm"
+	"software.sslmate.com/src/go-pkcs12"
+)
+
+// LegoService handles ACME certificate operations using the lego library
+type LegoService struct {
+	db         *gorm.DB
+	config     *config.ACMEConfig  // 可选：文件配置（优先级低于数据库）
+	settingSvc *SettingService     // 数据库配置服务
+	encryptor  *internalCrypto.Encryptor
+}
+
+// NewLegoService creates a new LegoService with file-based config (legacy)
+func NewLegoService(db *gorm.DB, cfg *config.ACMEConfig, encryptor *internalCrypto.Encryptor) *LegoService {
+	return &LegoService{
+		db:        db,
+		config:    cfg,
+		encryptor: encryptor,
+	}
+}
+
+// NewLegoServiceWithSettings creates a new LegoService with database-based settings
+func NewLegoServiceWithSettings(db *gorm.DB, settingSvc *SettingService, encryptor *internalCrypto.Encryptor) *LegoService {
+	return &LegoService{
+		db:         db,
+		settingSvc: settingSvc,
+		encryptor:  encryptor,
+	}
+}
+
+// getACMESettings 获取 ACME 配置（优先从数据库读取）
+func (s *LegoService) getACMESettings() ACMESettings {
+	if s.settingSvc != nil {
+		return s.settingSvc.GetACMEConfig()
+	}
+	// 回退到文件配置
+	if s.config != nil {
+		return ACMESettings{
+			DNSResolvers: s.config.DNS.Resolvers,
+			DNSTimeout:   s.config.DNS.Timeout,
+		}
+	}
+	// 默认值
+	return ACMESettings{
+		DNSResolvers: "8.8.8.8:53,1.1.1.1:53",
+		DNSTimeout:   "10s",
+	}
+}
+
+// getDNSChecker 创建 DNS 检查器（每次调用时根据最新配置创建）
+func (s *LegoService) getDNSChecker() *acme.DNSChecker {
+	settings := s.getACMESettings()
+	resolvers := acme.ParseResolvers(settings.DNSResolvers)
+	timeout, _ := time.ParseDuration(settings.DNSTimeout)
+	if timeout == 0 {
+		timeout = 10 * time.Second
+	}
+	return acme.NewDNSChecker(resolvers, timeout)
+}
+
+// CreateOrder creates a new certificate order with the ACME CA.
+// This generates a private key, creates an order, and stores challenges for user DNS setup.
+func (s *LegoService) CreateOrder(certID uint, email string, domains []string, keyType string, keySize int) error {
+	// Get or create ACME account
+	account, err := s.getOrCreateAccount(email)
+	if err != nil {
+		return fmt.Errorf("failed to get/create ACME account: %w", err)
+	}
+
+	// Generate certificate private key
+	kt := acme.KeyType(keyType)
+	if keySize == 0 {
+		keySize = acme.GetDefaultKeySize(kt)
+	}
+	if err := acme.ValidateKeySize(kt, keySize); err != nil {
+		return fmt.Errorf("invalid key size: %w", err)
+	}
+
+	certKey, err := acme.GeneratePrivateKey(kt, keySize)
+	if err != nil {
+		return fmt.Errorf("failed to generate certificate key: %w", err)
+	}
+
+	// Encode and encrypt the private key
+	keyPEM, err := acme.EncodePrivateKeyPEM(certKey)
+	if err != nil {
+		return fmt.Errorf("failed to encode private key: %w", err)
+	}
+	encryptedKey, err := s.encryptor.Encrypt(keyPEM)
+	if err != nil {
+		return fmt.Errorf("failed to encrypt private key: %w", err)
+	}
+
+	// Create ACME client
+	client, err := s.createClientFromAccount(account)
+	if err != nil {
+		return fmt.Errorf("failed to create ACME client: %w", err)
+	}
+
+	// Set up manual DNS provider with challenge storage callback
+	var challenges []model.Challenge
+	provider := acme.NewManualDNSProvider(
+		func(info acme.ChallengeInfo) error {
+			challenge := model.Challenge{
+				CertificateID: certID,
+				Domain:        info.Domain,
+				TXTHost:       info.TXTHost,
+				TXTValue:      info.TXTValue,
+				Token:         info.Token,
+				KeyAuth:       info.KeyAuth,
+				Status:        model.ChallengeStatusPending,
+			}
+			challenges = append(challenges, challenge)
+			return nil
+		},
+		nil,
+	)
+
+	if err := client.SetDNSProvider(provider); err != nil {
+		return fmt.Errorf("failed to set DNS provider: %w", err)
+	}
+
+	// Request the certificate - this will populate challenges via the provider
+	certs, err := client.ObtainCertificate(domains, certKey)
+	if err != nil {
+		// Even if we fail to obtain the certificate, we should save the challenges
+		// so the user can set up DNS records manually
+		if len(challenges) > 0 {
+			if saveErr := s.saveChallenges(certID, challenges); saveErr != nil {
+				return fmt.Errorf("failed to obtain certificate: %w (also failed to save challenges: %v)", err, saveErr)
+			}
+			// Update certificate with the account and key info
+			if updateErr := s.db.Model(&model.Certificate{}).Where("id = ?", certID).Updates(map[string]interface{}{
+				"account_id": account.ID,
+				"key_pem":    encryptedKey,
+				"key_size":   keySize,
+			}).Error; updateErr != nil {
+				return fmt.Errorf("failed to obtain certificate: %w (also failed to update certificate: %v)", err, updateErr)
+			}
+		}
+		return fmt.Errorf("failed to obtain certificate: %w", err)
+	}
+
+	// Save challenges
+	if err := s.saveChallenges(certID, challenges); err != nil {
+		return fmt.Errorf("failed to save challenges: %w", err)
+	}
+
+	// Parse certificate to get metadata
+	certInfo, err := parseCertificate(certs.Certificate)
+	if err != nil {
+		return fmt.Errorf("failed to parse certificate: %w", err)
+	}
+
+	// Update certificate record with the issued certificate
+	now := time.Now()
+	updates := map[string]interface{}{
+		"account_id":      account.ID,
+		"key_pem":         encryptedKey,
+		"key_size":        keySize,
+		"cert_pem":        string(certs.Certificate),
+		"chain_pem":       string(certs.Certificate), // lego returns fullchain by default
+		"issuer_cert_pem": string(certs.IssuerCertificate),
+		"serial_number":   certInfo.SerialNumber,
+		"fingerprint":     certInfo.Fingerprint,
+		"issued_at":       &now,
+		"expires_at":      &certInfo.NotAfter,
+		"status":          model.CertificateStatusReady,
+	}
+
+	if err := s.db.Model(&model.Certificate{}).Where("id = ?", certID).Updates(updates).Error; err != nil {
+		return fmt.Errorf("failed to update certificate: %w", err)
+	}
+
+	// Update all challenges to verified
+	if err := s.db.Model(&model.Challenge{}).Where("certificate_id = ?", certID).Updates(map[string]interface{}{
+		"status":       model.ChallengeStatusVerified,
+		"validated_at": &now,
+	}).Error; err != nil {
+		return fmt.Errorf("failed to update challenges: %w", err)
+	}
+
+	return nil
+}
+
+// PreVerifyDNS checks if DNS TXT records are correctly set up for all challenges.
+func (s *LegoService) PreVerifyDNS(certID uint) ([]acme.DNSCheckResult, bool, error) {
+	var challenges []model.Challenge
+	if err := s.db.Where("certificate_id = ?", certID).Find(&challenges).Error; err != nil {
+		return nil, false, fmt.Errorf("failed to get challenges: %w", err)
+	}
+
+	if len(challenges) == 0 {
+		return nil, false, fmt.Errorf("no challenges found for certificate %d", certID)
+	}
+
+	checks := make([]struct {
+		Domain        string
+		TXTHost       string
+		ExpectedValue string
+	}, len(challenges))
+
+	for i, ch := range challenges {
+		checks[i] = struct {
+			Domain        string
+			TXTHost       string
+			ExpectedValue string
+		}{
+			Domain:        ch.Domain,
+			TXTHost:       ch.TXTHost,
+			ExpectedValue: ch.TXTValue,
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	dnsChecker := s.getDNSChecker()
+	results := dnsChecker.CheckMultipleTXTRecords(ctx, checks)
+
+	// Update challenge DNS check status
+	now := time.Now()
+	for i, result := range results {
+		updates := map[string]interface{}{
+			"dns_checked_at": &now,
+			"dns_check_ok":   result.Matched,
+		}
+		s.db.Model(&model.Challenge{}).Where("id = ?", challenges[i].ID).Updates(updates)
+	}
+
+	allMatched := acme.AllMatched(results)
+	return results, allMatched, nil
+}
+
+// FinalizeOrder completes the certificate order after DNS verification.
+// This should be called after PreVerifyDNS returns success.
+func (s *LegoService) FinalizeOrder(certID uint) error {
+	var cert model.Certificate
+	if err := s.db.First(&cert, certID).Error; err != nil {
+		return fmt.Errorf("certificate not found: %w", err)
+	}
+
+	if cert.Status == model.CertificateStatusReady {
+		return nil // Already finalized
+	}
+
+	// Get domains from certificate
+	var domains []string
+	if err := json.Unmarshal([]byte(cert.Domains), &domains); err != nil {
+		return fmt.Errorf("failed to parse domains: %w", err)
+	}
+
+	// Decrypt private key
+	keyPEM, err := s.encryptor.Decrypt(cert.KeyPEM)
+	if err != nil {
+		return fmt.Errorf("failed to decrypt private key: %w", err)
+	}
+
+	certKey, err := acme.DecodePrivateKeyPEM(keyPEM)
+	if err != nil {
+		return fmt.Errorf("failed to decode private key: %w", err)
+	}
+
+	// Get account
+	if cert.AccountID == nil {
+		return fmt.Errorf("no account associated with certificate")
+	}
+
+	var account model.ACMEAccount
+	if err := s.db.First(&account, *cert.AccountID).Error; err != nil {
+		return fmt.Errorf("account not found: %w", err)
+	}
+
+	// Create ACME client
+	client, err := s.createClientFromAccount(&account)
+	if err != nil {
+		return fmt.Errorf("failed to create ACME client: %w", err)
+	}
+
+	// Set up manual DNS provider (no-op since DNS is already set)
+	provider := acme.NewManualDNSProvider(nil, nil)
+	if err := client.SetDNSProvider(provider); err != nil {
+		return fmt.Errorf("failed to set DNS provider: %w", err)
+	}
+
+	// Obtain certificate
+	certs, err := client.ObtainCertificate(domains, certKey)
+	if err != nil {
+		// Update certificate status to failed
+		s.db.Model(&cert).Updates(map[string]interface{}{
+			"status": model.CertificateStatusFailed,
+		})
+		return fmt.Errorf("failed to obtain certificate: %w", err)
+	}
+
+	// Parse certificate to get metadata
+	certInfo, err := parseCertificate(certs.Certificate)
+	if err != nil {
+		return fmt.Errorf("failed to parse certificate: %w", err)
+	}
+
+	// Update certificate record
+	now := time.Now()
+	updates := map[string]interface{}{
+		"cert_pem":        string(certs.Certificate),
+		"chain_pem":       string(certs.Certificate),
+		"issuer_cert_pem": string(certs.IssuerCertificate),
+		"serial_number":   certInfo.SerialNumber,
+		"fingerprint":     certInfo.Fingerprint,
+		"issued_at":       &now,
+		"expires_at":      &certInfo.NotAfter,
+		"status":          model.CertificateStatusReady,
+	}
+
+	if err := s.db.Model(&cert).Updates(updates).Error; err != nil {
+		return fmt.Errorf("failed to update certificate: %w", err)
+	}
+
+	// Update challenges to verified
+	if err := s.db.Model(&model.Challenge{}).Where("certificate_id = ?", certID).Updates(map[string]interface{}{
+		"status":       model.ChallengeStatusVerified,
+		"validated_at": &now,
+	}).Error; err != nil {
+		return fmt.Errorf("failed to update challenges: %w", err)
+	}
+
+	return nil
+}
+
+// DownloadFormat represents the available certificate download formats
+type DownloadFormat string
+
+const (
+	DownloadFormatPEM       DownloadFormat = "pem"       // Certificate only
+	DownloadFormatFullChain DownloadFormat = "fullchain" // Certificate + intermediate
+	DownloadFormatPFX       DownloadFormat = "pfx"       // PKCS#12 format
+	DownloadFormatZIP       DownloadFormat = "zip"       // All files in a zip
+)
+
+// GetCertificateBundle returns the certificate in the specified format.
+func (s *LegoService) GetCertificateBundle(certID uint, format DownloadFormat, password string) ([]byte, string, error) {
+	var cert model.Certificate
+	if err := s.db.First(&cert, certID).Error; err != nil {
+		return nil, "", fmt.Errorf("certificate not found: %w", err)
+	}
+
+	if cert.Status != model.CertificateStatusReady {
+		return nil, "", fmt.Errorf("certificate is not ready")
+	}
+
+	// Decrypt private key
+	keyPEM, err := s.encryptor.Decrypt(cert.KeyPEM)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to decrypt private key: %w", err)
+	}
+
+	switch format {
+	case DownloadFormatPEM:
+		return []byte(cert.CertPEM), "certificate.pem", nil
+
+	case DownloadFormatFullChain:
+		return []byte(cert.ChainPEM), "fullchain.pem", nil
+
+	case DownloadFormatPFX:
+		if password == "" {
+			password = "changeit" // Default password if not specified
+		}
+		pfxData, err := createPFX([]byte(cert.CertPEM), keyPEM, password)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to create PFX: %w", err)
+		}
+		return pfxData, "certificate.pfx", nil
+
+	case DownloadFormatZIP:
+		zipData, err := createZipBundle(cert, keyPEM)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to create ZIP: %w", err)
+		}
+		return zipData, "certificate.zip", nil
+
+	default:
+		return nil, "", fmt.Errorf("unsupported format: %s", format)
+	}
+}
+
+// GenerateChallenges generates DNS challenges for a certificate without contacting the CA.
+// This is used for the initial certificate creation flow.
+func (s *LegoService) GenerateChallenges(certID uint, domains []string) ([]model.Challenge, error) {
+	var challenges []model.Challenge
+	for _, domain := range domains {
+		txtHost := acme.GetTXTRecordName(domain)
+		// Generate a placeholder TXT value - the real value will come from the CA
+		challenge := model.Challenge{
+			CertificateID: certID,
+			Domain:        domain,
+			TXTHost:       txtHost,
+			TXTValue:      "pending-ca-authorization",
+			Status:        model.ChallengeStatusPending,
+		}
+		challenges = append(challenges, challenge)
+	}
+	return challenges, nil
+}
+
+// getOrCreateAccount gets an existing ACME account or creates a new one.
+func (s *LegoService) getOrCreateAccount(email string) (*model.ACMEAccount, error) {
+	if email == "" {
+		return nil, fmt.Errorf("email is required")
+	}
+
+	// 统一使用 production 环境
+	caURL := acme.LetsEncryptProduction
+
+	// Try to find existing account
+	var account model.ACMEAccount
+	err := s.db.Where("email = ? AND ca_url = ?", email, caURL).First(&account).Error
+	if err == nil {
+		return &account, nil
+	}
+
+	if err != gorm.ErrRecordNotFound {
+		return nil, fmt.Errorf("database error: %w", err)
+	}
+
+	// Create new account
+	accountKey, err := acme.GeneratePrivateKey(acme.KeyTypeECC, 256)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate account key: %w", err)
+	}
+
+	keyPEM, err := acme.EncodePrivateKeyPEM(accountKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode account key: %w", err)
+	}
+
+	encryptedKey, err := s.encryptor.Encrypt(keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt account key: %w", err)
+	}
+
+	// Register with CA
+	client, err := acme.NewClient(acme.ClientConfig{
+		CAURL:      caURL,
+		Email:      email,
+		PrivateKey: accountKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ACME client: %w", err)
+	}
+
+	reg, err := client.RegisterOrRetrieve()
+	if err != nil {
+		return nil, fmt.Errorf("failed to register account: %w", err)
+	}
+
+	regJSON, err := acme.RegistrationToJSON(reg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize registration: %w", err)
+	}
+
+	account = model.ACMEAccount{
+		Email:        email,
+		CAURL:        caURL,
+		PrivateKey:   encryptedKey,
+		Registration: regJSON,
+	}
+
+	if err := s.db.Create(&account).Error; err != nil {
+		return nil, fmt.Errorf("failed to save account: %w", err)
+	}
+
+	return &account, nil
+}
+
+func (s *LegoService) createClientFromAccount(account *model.ACMEAccount) (*acme.Client, error) {
+	// Decrypt account key
+	keyPEM, err := s.encryptor.Decrypt(account.PrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decrypt account key: %w", err)
+	}
+
+	accountKey, err := acme.DecodePrivateKeyPEM(keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode account key: %w", err)
+	}
+
+	reg, err := acme.RegistrationFromJSON(account.Registration)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize registration: %w", err)
+	}
+
+	return acme.NewClient(acme.ClientConfig{
+		CAURL:        account.CAURL,
+		Email:        account.Email,
+		PrivateKey:   accountKey.(crypto.PrivateKey),
+		Registration: reg,
+	})
+}
+
+func (s *LegoService) saveChallenges(certID uint, challenges []model.Challenge) error {
+	// Delete existing challenges for this certificate
+	if err := s.db.Where("certificate_id = ?", certID).Delete(&model.Challenge{}).Error; err != nil {
+		return err
+	}
+
+	// Insert new challenges
+	for i := range challenges {
+		challenges[i].CertificateID = certID
+		if err := s.db.Create(&challenges[i]).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// Certificate info extracted from PEM
+type certInfo struct {
+	SerialNumber string
+	Fingerprint  string
+	NotAfter     time.Time
+}
+
+func parseCertificate(certPEM []byte) (*certInfo, error) {
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode certificate PEM")
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse certificate: %w", err)
+	}
+
+	// Calculate SHA-256 fingerprint
+	fingerprint := sha256.Sum256(cert.Raw)
+
+	return &certInfo{
+		SerialNumber: formatSerialNumber(cert.SerialNumber),
+		Fingerprint:  hex.EncodeToString(fingerprint[:]),
+		NotAfter:     cert.NotAfter,
+	}, nil
+}
+
+func formatSerialNumber(serial *big.Int) string {
+	return strings.ToUpper(hex.EncodeToString(serial.Bytes()))
+}
+
+func createPFX(certPEM, keyPEM []byte, password string) ([]byte, error) {
+	// Parse certificate
+	certBlock, _ := pem.Decode(certPEM)
+	if certBlock == nil {
+		return nil, fmt.Errorf("failed to decode certificate PEM")
+	}
+	cert, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse certificate: %w", err)
+	}
+
+	// Parse private key
+	key, err := acme.DecodePrivateKeyPEM(keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode private key: %w", err)
+	}
+
+	// Parse CA certificates (if any remaining in the chain)
+	var caCerts []*x509.Certificate
+	rest := certPEM
+	for {
+		rest = rest[len(certBlock.Bytes)+len("-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n"):]
+		if len(rest) == 0 {
+			break
+		}
+		block, _ := pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		caCert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			break
+		}
+		caCerts = append(caCerts, caCert)
+		certBlock = block
+	}
+
+	pfxData, err := pkcs12.Modern.Encode(key, cert, caCerts, password)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode PFX: %w", err)
+	}
+
+	return pfxData, nil
+}
+
+func createZipBundle(cert model.Certificate, keyPEM []byte) ([]byte, error) {
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+
+	// Add certificate
+	certFile, err := w.Create("certificate.pem")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := certFile.Write([]byte(cert.CertPEM)); err != nil {
+		return nil, err
+	}
+
+	// Add fullchain
+	chainFile, err := w.Create("fullchain.pem")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := chainFile.Write([]byte(cert.ChainPEM)); err != nil {
+		return nil, err
+	}
+
+	// Add private key
+	keyFile, err := w.Create("private.key")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := keyFile.Write(keyPEM); err != nil {
+		return nil, err
+	}
+
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
