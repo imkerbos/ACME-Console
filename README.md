@@ -67,11 +67,20 @@
   - TXT 汇总表
   - 客户填写模板
 
-### Flow
-- 证书的生命周期流程
----
-Issue → TXT → Verify → Renew → Package → Deploy
----
+## Flow
+
+证书的生命周期流程：
+
+```text
+Issue -> TXT -> Verify -> Renew -> Package -> Deploy
+```
+
+Issue：发起签发（acme.sh issue）
+TXT：输出 DNS TXT challenge（手工/模板）
+Verify：校验 TXT 生效（dig/DoH）
+Renew：续期（acme.sh renew）
+Package：打包证书（zip / 目录结构）
+Deploy：部署到目标（CDN / LB / Ingress）
 
 
 ### Target
@@ -124,20 +133,23 @@ Issue → TXT → Verify → Renew → Package → Deploy
 
 ## 📂 Architecture (High Level)
 
----
-+------------------+
-| Web Console |
-+--------+---------+
-|
-v
-+------------------+
-| acme-console API|
-+--------+---------+
-|
-v
-+------------------+
-| acme.sh CLI |
-+------------------+
+
+```text
++-------------+        +------------------+        +-------------+
+| Web Console | -----> | acme-console API | -----> | acme.sh CLI |
++-------------+        +------------------+        +-------------+
+                               |
+                               v
+                        +------------------+
+                        |     Storage      |
+                        |  SQLite / PG     |
+                        +------------------+
+                               |
+                               v
+                        +------------------+
+                        |     ACME CA      |
+                        | ZeroSSL / LE     |
+                        +------------------+
 
 ---
 
