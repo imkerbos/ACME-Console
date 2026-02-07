@@ -1,0 +1,26 @@
+server:
+  host: "0.0.0.0"
+  port: 10020
+
+database:
+  host: "host.docker.internal"
+  port: 3306
+  user: "root"
+  password: "123456"
+  dbname: "acme_console"
+
+jwt:
+  secret: "acme-console-secret-key-change-in-production"
+  expire_hours: 24
+
+# ACME Configuration
+# Set these values to enable real ACME certificate issuance
+acme:
+  dns:
+    resolvers: "8.8.8.8:53,1.1.1.1:53"  # DNS servers for TXT record verification
+    timeout: "10s"
+
+# Encryption Configuration
+# Required for storing private keys securely
+encryption:
+  master_key: "8a0ff7c5da4411ff3184a0a5e5d0fe17a85e8cd3be068e01b5276f82566dc679"  # 32-byte hex-encoded key (64 characters). Generate with: openssl rand -hex 32

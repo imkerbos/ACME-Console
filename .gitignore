@@ -1,0 +1,47 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+build/
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config files with secrets
+configs/config.local.yaml
+*.local.yaml
+
+# Logs
+*.log
+logs/
+build-errors.log
+
+# Temporary files
+tmp/
+temp/
+
+# Frontend
+web/node_modules/
+web/dist/
+web/.vite/

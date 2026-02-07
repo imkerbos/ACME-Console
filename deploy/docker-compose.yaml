@@ -1,0 +1,12 @@
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    ports:
+      - "10020:10020"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../configs:/app/configs:ro
+    restart: unless-stopped

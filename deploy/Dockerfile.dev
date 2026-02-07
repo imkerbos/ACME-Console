@@ -1,0 +1,19 @@
+FROM golang:1.23-alpine
+
+WORKDIR /app
+
+# Enable Go toolchain auto-download and set mirrors
+ENV GOTOOLCHAIN=auto
+ENV GOPROXY=https://goproxy.cn,direct
+ENV GOMODCACHE=/go/pkg/mod
+
+# Pre-download Go 1.25 toolchain and install air
+RUN go version && \
+    go install github.com/air-verse/air@latest && \
+    apk add --no-cache curl
+
+# Expose port
+EXPOSE 10020
+
+# Run air for hot reload
+CMD ["air", "-c", ".air.toml"]

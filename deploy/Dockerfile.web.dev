@@ -1,0 +1,21 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Set npm registry to China mirror for faster downloads
+RUN npm config set registry https://registry.npmmirror.com
+
+# Copy package files from web directory
+COPY web/package*.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy source code from web directory
+COPY web/ .
+
+# Expose port
+EXPOSE 3200
+
+# Run vite dev server
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
