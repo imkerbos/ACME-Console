@@ -118,7 +118,7 @@ Issue -> TXT -> Verify -> Renew -> Package -> Deploy
 - ACME Client: acme.sh (external)
 - API: REST
 - UI: Web Console (TBD)
-- Storage: SQLite / PostgreSQL
+- Storage: MySQL
 - Auth: Local / OIDC (future)
 
 ---
@@ -134,7 +134,7 @@ Issue -> TXT -> Verify -> Renew -> Package -> Deploy
                                v
                         +------------------+
                         |     Storage      |
-                        |  SQLite / PG     |
+                        |      MySQL       |
                         +------------------+
                                |
                                v
