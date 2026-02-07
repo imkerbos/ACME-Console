@@ -75,14 +75,6 @@
 Issue -> TXT -> Verify -> Renew -> Package -> Deploy
 ```
 
-Issue：发起签发（acme.sh issue）
-TXT：输出 DNS TXT challenge（手工/模板）
-Verify：校验 TXT 生效（dig/DoH）
-Renew：续期（acme.sh renew）
-Package：打包证书（zip / 目录结构）
-Deploy：部署到目标（CDN / LB / Ingress）
-
-
 ### Target
 - 证书最终使用位置
 - CDN
@@ -151,7 +143,7 @@ Deploy：部署到目标（CDN / LB / Ingress）
                         | ZeroSSL / LE     |
                         +------------------+
 
----
+```
 
 
 ---
