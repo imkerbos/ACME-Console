@@ -165,5 +165,5 @@ MIT
 
 ## 👤 Author
 
-Built by operators, for operators.
+Built by Kerbos, for operators.
 
