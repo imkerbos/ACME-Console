@@ -1,5 +1,6 @@
 .PHONY: build run test clean tidy fmt lint docker-build docker-up docker-down docker-logs \
-        web-install web-dev web-build run-with-web dev dev-down dev-logs dev-rebuild
+        web-install web-dev web-build run-with-web dev dev-down dev-logs dev-rebuild \
+        prod-up prod-down prod-logs prod-restart prod-update-frontend prod-update-backend
 
 # Build variables
 BINARY_NAME=acme-console
@@ -105,6 +106,46 @@ docker-down:
 
 docker-logs:
 	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml logs -f app
+
+# =============================================================================
+# Production Docker (前后端分离)
+# =============================================================================
+
+# 启动生产环境（前后端分离架构）
+prod-up:
+	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml up -d --build
+
+# 停止生产环境
+prod-down:
+	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml down
+
+# 查看生产环境日志
+prod-logs:
+	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml logs -f
+
+# 查看后端日志
+prod-logs-backend:
+	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml logs -f backend
+
+# 查看前端日志
+prod-logs-frontend:
+	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml logs -f frontend
+
+# 重启生产环境
+prod-restart:
+	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml restart
+
+# 只更新前端
+prod-update-frontend:
+	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml up -d --build frontend
+
+# 只更新后端
+prod-update-backend:
+	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml up -d --build backend
+
+# 查看生产环境状态
+prod-ps:
+	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml ps
 
 # =============================================================================
 # Frontend commands
