@@ -26,6 +26,7 @@ RUN apk add --no-cache ca-certificates tzdata curl
 WORKDIR /app
 
 COPY --from=builder /bin/acme-console .
+RUN mkdir -p logs
 
 EXPOSE 10020
 

@@ -18,14 +18,15 @@ func Init(isDev bool) error {
 	if isDev {
 		cfg = zap.NewDevelopmentConfig()
 		cfg.EncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+		cfg.OutputPaths = []string{"stdout"}
+		cfg.ErrorOutputPaths = []string{"stderr"}
 	} else {
 		cfg = zap.NewProductionConfig()
 		cfg.EncoderConfig.TimeKey = "timestamp"
 		cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+		cfg.OutputPaths = []string{"stdout", "logs/app.log"}
+		cfg.ErrorOutputPaths = []string{"stderr", "logs/error.log"}
 	}
-
-	cfg.OutputPaths = []string{"stdout"}
-	cfg.ErrorOutputPaths = []string{"stderr"}
 
 	var err error
 	Log, err = cfg.Build(zap.AddCallerSkip(1))
