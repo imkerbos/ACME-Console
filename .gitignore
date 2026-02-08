@@ -50,6 +50,9 @@ build-errors.log
 tmp/
 temp/
 
+# Deploy runtime data
+deploy/data/
+
 # Frontend
 web/node_modules/
 web/dist/

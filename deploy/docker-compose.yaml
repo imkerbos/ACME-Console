@@ -12,7 +12,8 @@ services:
     ports:
       - "${MYSQL_PORT:-3306}:3306"
     volumes:
-      - mysql_data:/var/lib/mysql
+      - ./data/mysql:/var/lib/mysql
+      - ./data/mysql-logs:/var/log/mysql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -32,6 +33,7 @@ services:
       - "${API_PORT:-10020}:10020"
     volumes:
       - ./configs:/app/configs:ro
+      - ./data/backend-logs:/app/logs
     environment:
       - GIN_MODE=release
     depends_on:
@@ -48,9 +50,8 @@ services:
       dockerfile: deploy/Dockerfile.frontend
     ports:
       - "${WEB_PORT:-80}:80"
+    volumes:
+      - ./data/nginx-logs:/var/log/nginx
     depends_on:
       - backend
     restart: unless-stopped
-
-volumes:
-  mysql_data:
