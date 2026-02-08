@@ -408,9 +408,13 @@ func (s *NotificationService) ListConfigs(workspaceID, certificateID *uint) ([]m
 
 	if workspaceID != nil {
 		query = query.Where("workspace_id = ?", *workspaceID)
+	} else {
+		query = query.Where("workspace_id IS NULL")
 	}
 	if certificateID != nil {
 		query = query.Where("certificate_id = ?", *certificateID)
+	} else {
+		query = query.Where("certificate_id IS NULL")
 	}
 
 	if err := query.Order("created_at DESC").Find(&configs).Error; err != nil {
