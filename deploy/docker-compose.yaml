@@ -1,0 +1,56 @@
+services:
+  # ---------------------------------------------------------------------------
+  # MySQL
+  # ---------------------------------------------------------------------------
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-acme_root_pass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-acme_console}
+      MYSQL_USER: ${MYSQL_USER:-acme}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-acme_pass}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Backend (Go API)
+  # ---------------------------------------------------------------------------
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    command: ["-config", "/app/configs/config.yaml", "-dev=false"]
+    ports:
+      - "${API_PORT:-10020}:10020"
+    volumes:
+      - ./configs:/app/configs:ro
+    environment:
+      - GIN_MODE=release
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Frontend (Nginx + SPA)
+  # ---------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    ports:
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  mysql_data:

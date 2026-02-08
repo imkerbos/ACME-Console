@@ -1,0 +1,38 @@
+# =============================================================================
+# Production Frontend Dockerfile — Node build + Nginx runtime
+# =============================================================================
+
+# Stage 1: Build
+FROM node:20-alpine AS builder
+
+WORKDIR /src
+
+# Set npm registry mirror
+RUN npm config set registry https://registry.npmmirror.com
+
+# Cache dependencies
+COPY web/package*.json ./
+RUN npm install
+
+# Build production assets
+COPY web/ .
+RUN npm run build
+
+# Stage 2: Runtime
+FROM nginx:1.27-alpine
+
+# Remove default config
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Copy custom nginx config
+COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy built assets
+COPY --from=builder /src/dist /usr/share/nginx/html
+
+EXPOSE 80
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=5 \
+  CMD curl -f http://localhost:80/ || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

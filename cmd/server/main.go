@@ -20,7 +20,7 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "configs/config.yaml", "path to config file")
+	configPath := flag.String("config", "configs/config.dev.yaml", "path to config file")
 	staticDir := flag.String("static", "", "path to static files directory (optional)")
 	dev := flag.Bool("dev", true, "development mode")
 	flag.Parse()

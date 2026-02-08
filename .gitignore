@@ -29,8 +29,17 @@ vendor/
 Thumbs.db
 
 # Config files with secrets
+configs/config.yaml
+configs/config.dev.yaml
 configs/config.local.yaml
+deploy/configs/config.yaml
 *.local.yaml
+
+# Dev tool config
+.air.toml
+
+# Backup files
+*.backup
 
 # Logs
 *.log

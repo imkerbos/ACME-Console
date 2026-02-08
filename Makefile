@@ -1,6 +1,8 @@
-.PHONY: build run test clean tidy fmt lint docker-build docker-up docker-down docker-logs \
-        web-install web-dev web-build run-with-web dev dev-down dev-logs dev-rebuild \
-        prod-up prod-down prod-logs prod-restart prod-update-frontend prod-update-backend
+.PHONY: build run test clean tidy fmt lint \
+        web-install web-dev web-build run-with-web \
+        dev dev-d dev-down dev-logs dev-logs-backend dev-logs-frontend dev-rebuild \
+        prod-up prod-down prod-logs prod-logs-backend prod-logs-frontend prod-restart \
+        prod-update-frontend prod-update-backend prod-ps
 
 # Build variables
 BINARY_NAME=acme-console
@@ -65,87 +67,71 @@ all: fmt tidy test build
 
 # Start development environment (backend with air + frontend with vite)
 dev:
-	docker compose -f $(DEPLOY_DIR)/docker-compose.dev.yaml up --build
+	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml up --build
 
 # Start in detached mode
 dev-d:
-	docker compose -f $(DEPLOY_DIR)/docker-compose.dev.yaml up --build -d
+	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml up --build -d
 
 # Stop development environment
 dev-down:
-	docker compose -f $(DEPLOY_DIR)/docker-compose.dev.yaml down
+	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml down
 
 # View logs
 dev-logs:
-	docker compose -f $(DEPLOY_DIR)/docker-compose.dev.yaml logs -f
+	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml logs -f
 
 # View backend logs only
 dev-logs-backend:
-	docker compose -f $(DEPLOY_DIR)/docker-compose.dev.yaml logs -f backend
+	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml logs -f backend
 
 # View frontend logs only
 dev-logs-frontend:
-	docker compose -f $(DEPLOY_DIR)/docker-compose.dev.yaml logs -f frontend
+	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml logs -f frontend
 
 # Rebuild and restart
 dev-rebuild:
-	docker compose -f $(DEPLOY_DIR)/docker-compose.dev.yaml up --build --force-recreate
+	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml up --build --force-recreate
 
 # =============================================================================
-# Production Docker
+# Production Docker (Nginx + Go API + MySQL)
 # =============================================================================
 
-docker-build:
-	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml build
-
-docker-up:
-	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml up -d
-
-docker-down:
-	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml down
-
-docker-logs:
-	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml logs -f app
-
-# =============================================================================
-# Production Docker (前后端分离)
-# =============================================================================
-
-# 启动生产环境（前后端分离架构）
+# 启动生产环境
 prod-up:
-	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml up -d --build
+	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml up -d --build
 
 # 停止生产环境
 prod-down:
-	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml down
+	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml down
 
 # 查看生产环境日志
 prod-logs:
-	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml logs -f
+	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml logs -f
 
 # 查看后端日志
 prod-logs-backend:
-	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml logs -f backend
+	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml logs -f backend
 
 # 查看前端日志
 prod-logs-frontend:
-	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml logs -f frontend
+	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml logs -f frontend
 
 # 重启生产环境
 prod-restart:
-	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml restart
+	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml restart
 
 # 只更新前端
 prod-update-frontend:
-	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml up -d --build frontend
+	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml up -d --build frontend
 
 # 只更新后端
 prod-update-backend:
-	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml up -d --build backend
+	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml up -d --build backend
 
 # 查看生产环境状态
 prod-ps:
-	cd $(DEPLOY_DIR) && docker compose -f docker-compose.prod.yaml ps
+	docker compose -f $(DEPLOY_DIR)/docker-compose.yaml ps
 
 # =============================================================================
 # Frontend commands
