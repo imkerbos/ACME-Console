@@ -143,6 +143,20 @@ type ACMESettings struct {
 	DNSTimeout   string `json:"dns_timeout"`
 }
 
+// SiteSettings 网站配置结构
+type SiteSettings struct {
+	Title    string `json:"title"`
+	Subtitle string `json:"subtitle"`
+}
+
+// GetSiteConfig 获取网站配置
+func (s *SettingService) GetSiteConfig() SiteSettings {
+	return SiteSettings{
+		Title:    s.GetWithDefault(model.SettingSiteTitle, "ACME Console"),
+		Subtitle: s.GetWithDefault(model.SettingSiteSubtitle, "证书管理系统"),
+	}
+}
+
 // GetDNSTimeout 获取 DNS 超时时间
 func (s *SettingService) GetDNSTimeout() time.Duration {
 	timeout := s.GetWithDefault(model.SettingDNSTimeout, "10s")

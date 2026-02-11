@@ -35,6 +35,9 @@ configs/config.local.yaml
 deploy/configs/config.yaml
 *.local.yaml
 
+# Claude Code
+CLAUDE.md
+
 # Dev tool config
 .air.toml
 

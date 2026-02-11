@@ -14,6 +14,8 @@ import WorkspaceList from './views/WorkspaceList.vue'
 import WorkspaceDetail from './views/WorkspaceDetail.vue'
 import Profile from './views/Profile.vue'
 import UserList from './views/UserList.vue'
+import SystemSettings from './views/SystemSettings.vue'
+import SystemAbout from './views/SystemAbout.vue'
 
 const routes = [
   {
@@ -66,6 +68,18 @@ const routes = [
     path: '/users',
     name: 'UserList',
     component: UserList,
+    meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    path: '/settings',
+    name: 'SystemSettings',
+    component: SystemSettings,
+    meta: { requiresAuth: true, requiresAdmin: true }
+  },
+  {
+    path: '/about',
+    name: 'SystemAbout',
+    component: SystemAbout,
     meta: { requiresAuth: true, requiresAdmin: true }
   }
 ]

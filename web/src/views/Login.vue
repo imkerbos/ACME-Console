@@ -24,8 +24,8 @@
             <path d="M25 70 L50 30 L75 70 M35 55 L65 55" stroke="white" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </div>
-        <h1 class="title">{{ $t('auth.loginTitle') }}</h1>
-        <p class="subtitle">{{ $t('auth.loginSubtitle') }}</p>
+        <h1 class="title">{{ siteTitle }}</h1>
+        <p class="subtitle">{{ siteSubtitle }}</p>
       </div>
 
       <form @submit.prevent="handleLogin" class="login-form">
@@ -70,21 +70,29 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuth } from '../stores/auth'
+import { useSite } from '../stores/site'
 import { setLocale as setAppLocale } from '../locales'
 
 const router = useRouter()
 const { locale } = useI18n()
 const { login } = useAuth()
+const site = useSite()
 
 const username = ref('')
 const password = ref('')
 const loading = ref(false)
 const error = ref(null)
 const currentLocale = computed(() => locale.value)
+const siteTitle = computed(() => site.getTitle())
+const siteSubtitle = computed(() => site.getSubtitle())
+
+onMounted(() => {
+  site.load()
+})
 
 function setLocale(lang) {
   setAppLocale(lang)

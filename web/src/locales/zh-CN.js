@@ -31,7 +31,10 @@ export default {
     workspaces: '工作空间',
     users: '用户管理',
     profile: '个人资料',
-    logout: '退出登录'
+    logout: '退出登录',
+    system: '系统管理',
+    settings: '系统设置',
+    about: '系统说明'
   },
 
   auth: {
@@ -223,6 +226,34 @@ export default {
     certificates: '证书',
     viewCertificates: '查看证书',
     notifications: '过期通知'
+  },
+
+  system: {
+    title: '系统管理',
+    siteSettings: '网站设置',
+    siteSettingsDesc: '配置网站标题、副标题等基本信息',
+    siteTitle: '网站标题',
+    siteTitlePlaceholder: '请输入网站标题',
+    siteTitleHint: '显示在浏览器标签页和登录页面',
+    siteSubtitle: '网站副标题',
+    siteSubtitlePlaceholder: '请输入网站副标题',
+    siteSubtitleHint: '显示在登录页面标题下方',
+    saving: '保存中...',
+    settingsSaved: '设置保存成功',
+    aboutVersion: '版本 {version}',
+    aboutDescription: 'ACME Console 是一个自托管的 ACME 证书管理控制台，为多域名、手动 DNS 验证和通配符证书场景提供可视化管理和工作流编排。基于 acme.sh 构建，开箱即用。',
+    openSource: '开源免费',
+    freeLicense: '免费授权',
+    features: '核心功能',
+    featureACME: 'ACME 证书自动签发与续期',
+    featureDNS: 'DNS-01 验证，支持手动与 API 模式',
+    featureWildcard: '通配符证书与多 SAN 域名支持',
+    featureWorkspace: '工作空间与团队协作管理',
+    featureNotification: '证书过期通知（Webhook / Telegram / 飞书）',
+    links: '项目链接',
+    license: '开源协议',
+    licenseText: '本项目基于 MIT 协议开源发布，您可以自由使用、修改和分发本软件。无论是个人项目还是商业用途，均无需支付任何费用。欢迎 Star、Fork 和提交 Pull Request，一起让这个项目变得更好！',
+    madeWith: 'ACME Console - 让证书管理更简单'
   },
 
   notification: {

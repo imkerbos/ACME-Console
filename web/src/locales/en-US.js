@@ -31,7 +31,10 @@ export default {
     workspaces: 'Workspaces',
     users: 'Users',
     profile: 'Profile',
-    logout: 'Logout'
+    logout: 'Logout',
+    system: 'System',
+    settings: 'Settings',
+    about: 'About'
   },
 
   auth: {
@@ -223,6 +226,34 @@ export default {
     certificates: 'Certificates',
     viewCertificates: 'View Certificates',
     notifications: 'Expiry Notifications'
+  },
+
+  system: {
+    title: 'System',
+    siteSettings: 'Site Settings',
+    siteSettingsDesc: 'Configure site title, subtitle and other basic information',
+    siteTitle: 'Site Title',
+    siteTitlePlaceholder: 'Enter site title',
+    siteTitleHint: 'Displayed in browser tab and login page',
+    siteSubtitle: 'Site Subtitle',
+    siteSubtitlePlaceholder: 'Enter site subtitle',
+    siteSubtitleHint: 'Displayed below the title on the login page',
+    saving: 'Saving...',
+    settingsSaved: 'Settings saved successfully',
+    aboutVersion: 'Version {version}',
+    aboutDescription: 'ACME Console is a self-hosted ACME certificate management console that provides visual management and workflow orchestration for multi-domain, manual DNS validation, and wildcard certificate scenarios. Built on acme.sh, ready to use out of the box.',
+    openSource: 'Open Source',
+    freeLicense: 'Free License',
+    features: 'Key Features',
+    featureACME: 'Automated ACME certificate issuance and renewal',
+    featureDNS: 'DNS-01 validation with manual and API modes',
+    featureWildcard: 'Wildcard certificates and multi-SAN domain support',
+    featureWorkspace: 'Workspace and team collaboration management',
+    featureNotification: 'Certificate expiry notifications (Webhook / Telegram / Lark)',
+    links: 'Project Links',
+    license: 'License',
+    licenseText: 'This project is open-sourced under the MIT License. You are free to use, modify, and distribute this software. No fees are required for personal or commercial use. Feel free to Star, Fork, and submit Pull Requests to help make this project better!',
+    madeWith: 'ACME Console - Making certificate management simple'
   },
 
   notification: {

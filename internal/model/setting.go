@@ -11,6 +11,8 @@ const (
 	SettingACMEEmail    = "acme.email"    // ACME 账户邮箱（已废弃，改为申请时填写）
 	SettingDNSResolvers = "dns.resolvers" // DNS 服务器列表，逗号分隔
 	SettingDNSTimeout   = "dns.timeout"   // DNS 查询超时，如 "10s"
+	SettingSiteTitle    = "site.title"    // 网站标题
+	SettingSiteSubtitle = "site.subtitle" // 网站副标题
 )
 
 // Setting 系统配置表
@@ -38,6 +40,8 @@ var defaultSettings = map[string]struct {
 }{
 	SettingDNSResolvers: {"8.8.8.8:53,1.1.1.1:53", "DNS 服务器列表，逗号分隔"},
 	SettingDNSTimeout:   {"10s", "DNS 查询超时时间"},
+	SettingSiteTitle:    {"ACME Console", "网站标题"},
+	SettingSiteSubtitle: {"证书管理系统", "网站副标题"},
 }
 
 // InitDefaultSettings 初始化默认配置

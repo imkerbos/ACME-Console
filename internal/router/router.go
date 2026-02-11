@@ -44,6 +44,9 @@ func Setup(handlers *Handlers, jwtManager *auth.JWTManager, staticFS fs.FS) *gin
 			authGroup.POST("/login", handlers.Auth.Login)
 		}
 
+		// Public settings (no auth required)
+		v1.GET("/settings/site", handlers.Setting.GetSite)
+
 		// Protected routes
 		protected := v1.Group("")
 		protected.Use(middleware.JWTAuth(jwtManager))
@@ -117,6 +120,7 @@ func Setup(handlers *Handlers, jwtManager *auth.JWTManager, staticFS fs.FS) *gin
 					settings.PUT("", handlers.Setting.Update)
 					settings.GET("/acme", handlers.Setting.GetACME)
 					settings.PUT("/acme", handlers.Setting.UpdateACME)
+					settings.PUT("/site", handlers.Setting.UpdateSite)
 				}
 			}
 		}

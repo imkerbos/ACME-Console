@@ -187,6 +187,17 @@ export const workspaceApi = {
   }
 }
 
+// Settings API (admin only)
+export const settingApi = {
+  getSite() {
+    return api.get('/settings/site')
+  },
+
+  updateSite(data) {
+    return api.put('/admin/settings/site', data)
+  }
+}
+
 // Notification API
 export const notificationApi = {
   list(params = {}) {

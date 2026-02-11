@@ -67,6 +67,46 @@ func (h *SettingHandler) UpdateACME(c *gin.Context) {
 	response.Success(c, config)
 }
 
+// GetSite 获取网站配置（公开接口，无需认证）
+// GET /api/v1/settings/site
+func (h *SettingHandler) GetSite(c *gin.Context) {
+	config := h.svc.GetSiteConfig()
+	response.Success(c, config)
+}
+
+// UpdateSiteRequest 网站配置更新请求
+type UpdateSiteRequest struct {
+	Title    *string `json:"title"`
+	Subtitle *string `json:"subtitle"`
+}
+
+// UpdateSite 更新网站配置
+// PUT /api/v1/admin/settings/site
+func (h *SettingHandler) UpdateSite(c *gin.Context) {
+	var req UpdateSiteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ValidationError(c, err)
+		return
+	}
+
+	if req.Title != nil {
+		if err := h.svc.Set(model.SettingSiteTitle, *req.Title); err != nil {
+			response.InternalError(c, err)
+			return
+		}
+	}
+
+	if req.Subtitle != nil {
+		if err := h.svc.Set(model.SettingSiteSubtitle, *req.Subtitle); err != nil {
+			response.InternalError(c, err)
+			return
+		}
+	}
+
+	config := h.svc.GetSiteConfig()
+	response.Success(c, config)
+}
+
 // UpdateRequest 通用配置更新请求
 type UpdateRequest struct {
 	Settings map[string]string `json:"settings" binding:"required"`
