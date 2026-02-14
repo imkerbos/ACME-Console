@@ -180,7 +180,13 @@ func (s *LegoService) PreVerifyDNS(certID uint) ([]acme.DNSCheckResult, bool, er
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Dynamic timeout based on challenge count: base 30s + 10s per challenge, max 180s
+	timeout := time.Duration(30+10*len(challenges)) * time.Second
+	if timeout > 180*time.Second {
+		timeout = 180 * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	dnsChecker := s.getDNSChecker()
@@ -202,9 +208,6 @@ func (s *LegoService) PreVerifyDNS(certID uint) ([]acme.DNSCheckResult, bool, er
 
 // FinalizeOrder completes the certificate order after DNS verification.
 func (s *LegoService) FinalizeOrder(certID uint) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-
 	var cert model.Certificate
 	if err := s.db.Preload("Challenges").First(&cert, certID).Error; err != nil {
 		return fmt.Errorf("certificate not found: %w", err)
@@ -222,6 +225,23 @@ func (s *LegoService) FinalizeOrder(certID uint) error {
 	if cert.AccountID == nil {
 		return fmt.Errorf("no account associated with certificate")
 	}
+
+	// Dynamic timeout based on domain count: base 120s + 30s per domain, max 600s
+	var domains []string
+	if err := json.Unmarshal([]byte(cert.Domains), &domains); err != nil {
+		return fmt.Errorf("failed to parse domains: %w", err)
+	}
+	domainCount := len(domains)
+	if domainCount < 1 {
+		domainCount = 1
+	}
+	timeout := time.Duration(120+30*domainCount) * time.Second
+	if timeout > 600*time.Second {
+		timeout = 600 * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
 	var account model.ACMEAccount
 	if err := s.db.First(&account, *cert.AccountID).Error; err != nil {
@@ -278,13 +298,7 @@ func (s *LegoService) FinalizeOrder(certID uint) error {
 		return fmt.Errorf("failed to decode private key: %w", err)
 	}
 
-	// Get domains from certificate
-	var domains []string
-	if err := json.Unmarshal([]byte(cert.Domains), &domains); err != nil {
-		return fmt.Errorf("failed to parse domains: %w", err)
-	}
-
-	// Create CSR
+	// Create CSR (domains already parsed above for timeout calculation)
 	csr, err := createCSR(domains, certKey)
 	if err != nil {
 		return fmt.Errorf("failed to create CSR: %w", err)

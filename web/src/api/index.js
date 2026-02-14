@@ -105,11 +105,13 @@ export const certificateApi = {
   },
 
   verify(id) {
-    return api.post(`/certificates/${id}/verify`, {}, { timeout: 120000 })
+    // 多域名证书验证可能需要较长时间，设置 5 分钟超时
+    return api.post(`/certificates/${id}/verify`, {}, { timeout: 300000 })
   },
 
   preVerify(id) {
-    return api.post(`/certificates/${id}/pre-verify`)
+    // 多域名 DNS 检查需要更多时间
+    return api.post(`/certificates/${id}/pre-verify`, {}, { timeout: 60000 })
   },
 
   download(id, format = 'zip', password = '') {

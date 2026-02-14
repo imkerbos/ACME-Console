@@ -58,7 +58,7 @@
           </div>
           <div class="header-actions">
             <button
-              v-if="certificate.status === 'pending'"
+              v-if="certificate.status === 'pending' || certificate.status === 'failed'"
               class="btn btn-secondary"
               :disabled="checking"
               @click="handlePreVerify"
@@ -70,7 +70,7 @@
               {{ checking ? '检查中...' : '检查 DNS' }}
             </button>
             <button
-              v-if="certificate.status === 'pending'"
+              v-if="certificate.status === 'pending' || certificate.status === 'failed'"
               class="btn btn-primary"
               :disabled="verifying"
               @click="handleVerify"
@@ -79,7 +79,7 @@
               <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
               </svg>
-              {{ verifying ? $t('challenge.verifying') : $t('challenge.verifyAndIssue') }}
+              {{ verifying ? $t('challenge.verifying') : (certificate.status === 'failed' ? '重新验证' : $t('challenge.verifyAndIssue')) }}
             </button>
             <button
               v-if="certificate.status === 'ready'"
