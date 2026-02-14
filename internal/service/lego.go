@@ -44,7 +44,7 @@ func NewLegoServiceWithSettings(db *gorm.DB, settingSvc *SettingService, encrypt
 // CreateOrder creates a new certificate order with the ACME CA.
 // This generates a private key, creates an order, and stores challenges for user DNS setup.
 func (s *LegoService) CreateOrder(certID uint, email string, domains []string, keyType string, keySize int) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
 	// Get or create ACME account

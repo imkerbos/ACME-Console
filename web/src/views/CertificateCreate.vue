@@ -27,7 +27,10 @@
           <circle cx="12" cy="12" r="10"/>
           <path d="M12 8v4M12 16h.01"/>
         </svg>
-        <span>{{ error }}</span>
+        <div class="alert-content">
+          <span>{{ error }}</span>
+          <p v-if="errorDetail" class="error-detail">{{ errorDetail }}</p>
+        </div>
       </div>
 
       <form @submit.prevent="handleSubmit" class="create-form">
@@ -124,6 +127,14 @@
           </p>
         </div>
 
+        <div v-if="submitting" class="submit-hint">
+          <svg class="hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 16v-4M12 8h.01"/>
+          </svg>
+          <span>{{ $t('certificate.creatingHint', { count: domainCount }) }}</span>
+        </div>
+
         <div class="form-actions">
           <router-link to="/certificates" class="btn btn-secondary">
             {{ $t('common.cancel') }}
@@ -159,6 +170,7 @@ const workspaceId = ref(null)
 const workspaces = ref([])
 const submitting = ref(false)
 const error = ref(null)
+const errorDetail = ref(null)
 
 // Initialize email with current user's email
 onMounted(async () => {
@@ -185,6 +197,7 @@ const domainCount = computed(() => {
 
 async function handleSubmit() {
   error.value = null
+  errorDetail.value = null
 
   const domains = domainsText.value
     .split('\n')
@@ -213,7 +226,17 @@ async function handleSubmit() {
 
     router.push(`/certificates/${response.data.id}`)
   } catch (e) {
-    error.value = e.message
+    if (e.message?.includes('timeout')) {
+      error.value = t('certificate.createTimeout')
+      errorDetail.value = t('certificate.createTimeoutDetail', { count: domains.length })
+    } else {
+      error.value = e.message
+      // Show raw error info for admin debugging
+      const raw = e.response?.data?.error || e.response?.data?.detail || e.stack
+      if (raw && raw !== e.message) {
+        errorDetail.value = raw
+      }
+    }
   } finally {
     submitting.value = false
   }
@@ -310,6 +333,43 @@ async function handleSubmit() {
 .alert-icon {
   width: 20px;
   height: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.alert-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.error-detail {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: monospace;
+  color: #7F1D1D;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.submit-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #FEF3C7;
+  color: #92400E;
+  border: 1px solid #FDE68A;
+  border-radius: 8px;
+  font-size: 0.8125rem;
+  margin-bottom: 1rem;
+}
+
+.hint-icon {
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
 }
 

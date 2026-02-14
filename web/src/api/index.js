@@ -94,7 +94,10 @@ export const certificateApi = {
   },
 
   create(data) {
-    return api.post('/certificates', data)
+    // 基础 10s + 每个域名 500ms，最少 10s，最多 180s
+    const domainCount = data.domains?.length || 1
+    const timeout = Math.min(Math.max(10000, 10000 + domainCount * 500), 180000)
+    return api.post('/certificates', data, { timeout })
   },
 
   delete(id) {
