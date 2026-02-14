@@ -408,7 +408,8 @@ async function handleDownload() {
     // Get domains for filename
     const domains = parseDomains(certificate.value.domains)
     const primaryDomain = domains[0] || 'certificate'
-    const filename = `${primaryDomain}.zip`
+    const suffix = domains.length > 1 ? `_${domains.length}domains` : ''
+    const filename = `${primaryDomain}${suffix}.zip`
 
     // Create download link for blob
     const blob = new Blob([response.data], { type: 'application/zip' })

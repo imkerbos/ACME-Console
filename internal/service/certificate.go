@@ -348,22 +348,22 @@ func (s *CertificateService) getMockCertificateBundle(certID uint, format string
 		domains = []string{"example.com"}
 	}
 
-	// Generate mock certificate content
+	// Generate mock certificate content (include all domains)
 	mockCert := fmt.Sprintf(`-----BEGIN CERTIFICATE-----
 MOCK CERTIFICATE FOR TESTING
-Domain: %s
+Domains: %s
 Key Type: %s
 Status: %s
 Created: %s
 -----END CERTIFICATE-----
-`, domains[0], cert.KeyType, cert.Status, cert.CreatedAt.Format(time.RFC3339))
+`, strings.Join(domains, ", "), cert.KeyType, cert.Status, cert.CreatedAt.Format(time.RFC3339))
 
-	mockKey := fmt.Sprintf(`-----BEGIN PRIVATE KEY-----
+	mockKey := `-----BEGIN PRIVATE KEY-----
 MOCK PRIVATE KEY FOR TESTING
 This is a mock certificate generated for testing purposes.
 Do not use in production.
 -----END PRIVATE KEY-----
-`)
+`
 
 	switch format {
 	case "pem":
@@ -373,34 +373,36 @@ Do not use in production.
 		return []byte(mockCert), "fullchain.pem", nil
 
 	case "zip":
-		// Create a simple zip with mock files
 		var buf bytes.Buffer
 		w := zip.NewWriter(&buf)
 
-		// Add certificate
-		certFile, _ := w.Create("certificate.pem")
-		certFile.Write([]byte(mockCert))
+		// Create per-domain directories
+		for _, domain := range domains {
+			dir := sanitizeDomainDir(domain)
 
-		// Add fullchain
-		chainFile, _ := w.Create("fullchain.pem")
-		chainFile.Write([]byte(mockCert))
+			certFile, _ := w.Create(dir + "/certificate.pem")
+			certFile.Write([]byte(mockCert))
 
-		// Add private key
-		keyFile, _ := w.Create("private.key")
-		keyFile.Write([]byte(mockKey))
+			chainFile, _ := w.Create(dir + "/fullchain.pem")
+			chainFile.Write([]byte(mockCert))
 
-		// Add README
+			keyFile, _ := w.Create(dir + "/private.key")
+			keyFile.Write([]byte(mockKey))
+		}
+
 		readmeFile, _ := w.Create("README.txt")
-		readmeFile.Write([]byte(`MOCK CERTIFICATE BUNDLE
+		readmeFile.Write([]byte(fmt.Sprintf(`MOCK CERTIFICATE BUNDLE
 
 This is a mock certificate bundle for testing purposes.
 To use real certificates, configure ACME settings in the admin panel.
 
-Files:
+Domains: %s
+
+Each domain directory contains:
 - certificate.pem: Certificate file
 - fullchain.pem: Full certificate chain
 - private.key: Private key file
-`))
+`, strings.Join(domains, ", "))))
 
 		w.Close()
 		return buf.Bytes(), "certificate.zip", nil

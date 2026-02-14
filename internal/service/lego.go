@@ -583,63 +583,88 @@ func createPFXV2(certPEM, keyPEM []byte, password string) ([]byte, error) {
 	return pfxData, nil
 }
 
+// sanitizeDomainDir converts a domain name to a safe directory name.
+// Wildcard domains like *.example.com become _wildcard_.example.com
+func sanitizeDomainDir(domain string) string {
+	return strings.ReplaceAll(domain, "*", "_wildcard_")
+}
+
 func createZipBundleV2(cert model.Certificate, keyPEM []byte) ([]byte, error) {
+	// Parse domains
+	var domains []string
+	if err := json.Unmarshal([]byte(cert.Domains), &domains); err != nil {
+		domains = []string{"certificate"}
+	}
+
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
 
-	// Add certificate
-	certFile, err := w.Create("certificate.pem")
-	if err != nil {
-		return nil, err
-	}
-	if _, err := certFile.Write([]byte(cert.CertPEM)); err != nil {
-		return nil, err
+	// Create per-domain directories, each containing the certificate files
+	for _, domain := range domains {
+		dir := sanitizeDomainDir(domain)
+
+		certFile, err := w.Create(dir + "/certificate.pem")
+		if err != nil {
+			return nil, err
+		}
+		if _, err := certFile.Write([]byte(cert.CertPEM)); err != nil {
+			return nil, err
+		}
+
+		chainFile, err := w.Create(dir + "/fullchain.pem")
+		if err != nil {
+			return nil, err
+		}
+		if _, err := chainFile.Write([]byte(cert.ChainPEM)); err != nil {
+			return nil, err
+		}
+
+		keyFile, err := w.Create(dir + "/private.key")
+		if err != nil {
+			return nil, err
+		}
+		if _, err := keyFile.Write(keyPEM); err != nil {
+			return nil, err
+		}
 	}
 
-	// Add fullchain
-	chainFile, err := w.Create("fullchain.pem")
-	if err != nil {
-		return nil, err
-	}
-	if _, err := chainFile.Write([]byte(cert.ChainPEM)); err != nil {
-		return nil, err
-	}
-
-	// Add private key
-	keyFile, err := w.Create("private.key")
-	if err != nil {
-		return nil, err
-	}
-	if _, err := keyFile.Write(keyPEM); err != nil {
-		return nil, err
-	}
-
-	// Add README
+	// Add README at root level
 	readmeFile, err := w.Create("README.txt")
 	if err != nil {
 		return nil, err
 	}
+
+	var domainList strings.Builder
+	for _, d := range domains {
+		domainList.WriteString("  - " + d + "\n")
+	}
+
 	readme := fmt.Sprintf(`SSL Certificate Bundle
 ======================
 
-Files included:
-- certificate.pem: Your SSL certificate
-- fullchain.pem: Certificate + intermediate CA certificates
-- private.key: Your private key (keep this secure!)
+This certificate covers %d domains:
+%s
+Each domain directory contains:
+  - certificate.pem: SSL certificate
+  - fullchain.pem:   Certificate + intermediate CA chain
+  - private.key:     Private key (keep this secure!)
 
-Domains: %s
-Issued: %s
+Issued:  %s
 Expires: %s
 
+Note: This is a multi-domain (SAN) certificate. All domains share the
+same certificate files. They are organized per-domain for deployment convenience.
+
 For Nginx:
-  ssl_certificate /path/to/fullchain.pem;
-  ssl_certificate_key /path/to/private.key;
+  ssl_certificate     /path/to/<domain>/fullchain.pem;
+  ssl_certificate_key /path/to/<domain>/private.key;
 
 For Apache:
-  SSLCertificateFile /path/to/certificate.pem
-  SSLCertificateKeyFile /path/to/private.key
-  SSLCertificateChainFile /path/to/fullchain.pem
-`, cert.Domains, cert.IssuedAt, cert.ExpiresAt)
+  SSLCertificateFile      /path/to/<domain>/certificate.pem
+  SSLCertificateKeyFile   /path/to/<domain>/private.key
+  SSLCertificateChainFile /path/to/<domain>/fullchain.pem
+`, len(domains), domainList.String(), cert.IssuedAt, cert.ExpiresAt)
+
 	if _, err := readmeFile.Write([]byte(readme)); err != nil {
 		return nil, err
 	}
