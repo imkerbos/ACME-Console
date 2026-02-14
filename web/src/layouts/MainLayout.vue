@@ -125,11 +125,20 @@
         <slot />
       </main>
     </div>
+
+    <!-- Back to Top -->
+    <transition name="fade">
+      <button v-if="showBackToTop" class="back-to-top" @click="scrollToTop">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 15l-6-6-6 6"/>
+        </svg>
+      </button>
+    </transition>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuth } from '../stores/auth'
@@ -206,6 +215,25 @@ function handleLogout() {
 function setLocale(lang) {
   setAppLocale(lang)
 }
+
+// Back to top
+const showBackToTop = ref(false)
+
+function handleScroll() {
+  showBackToTop.value = window.scrollY > 300
+}
+
+function scrollToTop() {
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+onMounted(() => {
+  window.addEventListener('scroll', handleScroll)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('scroll', handleScroll)
+})
 
 // Close dropdown when clicking outside
 document.addEventListener('click', (e) => {
@@ -551,5 +579,45 @@ document.addEventListener('click', (e) => {
 .content {
   flex: 1;
   padding: 1.5rem;
+}
+
+/* Back to Top */
+.back-to-top {
+  position: fixed;
+  bottom: 2rem;
+  right: 2rem;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #1F2937;
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transition: background 0.2s, transform 0.2s;
+  z-index: 99;
+}
+
+.back-to-top:hover {
+  background: #10B981;
+  transform: translateY(-2px);
+}
+
+.back-to-top svg {
+  width: 20px;
+  height: 20px;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>
