@@ -373,20 +373,20 @@ Do not use in production.
 		return []byte(mockCert), "fullchain.pem", nil
 
 	case "zip":
+		entries := mergeDomainsForZip(domains)
+
 		var buf bytes.Buffer
 		w := zip.NewWriter(&buf)
 
-		// Create per-domain directories
-		for _, domain := range domains {
-			dir := sanitizeDomainDir(domain)
-
-			certFile, _ := w.Create(dir + "/certificate.pem")
+		// Create merged per-domain directories
+		for _, entry := range entries {
+			certFile, _ := w.Create(entry.DirName + "/certificate.pem")
 			certFile.Write([]byte(mockCert))
 
-			chainFile, _ := w.Create(dir + "/fullchain.pem")
+			chainFile, _ := w.Create(entry.DirName + "/fullchain.pem")
 			chainFile.Write([]byte(mockCert))
 
-			keyFile, _ := w.Create(dir + "/private.key")
+			keyFile, _ := w.Create(entry.DirName + "/private.key")
 			keyFile.Write([]byte(mockKey))
 		}
 
@@ -396,13 +396,13 @@ Do not use in production.
 This is a mock certificate bundle for testing purposes.
 To use real certificates, configure ACME settings in the admin panel.
 
-Domains: %s
+Domains: %s (%d directories)
 
-Each domain directory contains:
+Each directory contains:
 - certificate.pem: Certificate file
 - fullchain.pem: Full certificate chain
 - private.key: Private key file
-`, strings.Join(domains, ", "))))
+`, strings.Join(domains, ", "), len(entries))))
 
 		w.Close()
 		return buf.Bytes(), "certificate.zip", nil

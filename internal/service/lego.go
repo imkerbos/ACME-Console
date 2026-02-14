@@ -583,25 +583,81 @@ func createPFXV2(certPEM, keyPEM []byte, password string) ([]byte, error) {
 	return pfxData, nil
 }
 
-// sanitizeDomainDir converts a domain name to a safe directory name.
-// Wildcard domains like *.example.com become _wildcard_.example.com
-func sanitizeDomainDir(domain string) string {
-	return strings.ReplaceAll(domain, "*", "_wildcard_")
+// zipDirEntry represents a merged directory entry for the ZIP bundle.
+// Wildcard + root domain pairs (e.g. *.example.com + example.com) are merged
+// into a single directory named after the root domain.
+type zipDirEntry struct {
+	DirName string   // directory name in ZIP
+	Domains []string // domains covered by this directory
+}
+
+// mergeDomainsForZip groups domains for ZIP directory creation.
+// *.example.com and example.com are merged into one "example.com" directory.
+// Standalone domains (e.g. api.other.com) get their own directory.
+func mergeDomainsForZip(domains []string) []zipDirEntry {
+	// Build a set for quick lookup
+	domainSet := make(map[string]bool, len(domains))
+	for _, d := range domains {
+		domainSet[d] = true
+	}
+
+	seen := make(map[string]bool)
+	var entries []zipDirEntry
+
+	for _, domain := range domains {
+		if seen[domain] {
+			continue
+		}
+
+		if strings.HasPrefix(domain, "*.") {
+			root := strings.TrimPrefix(domain, "*.")
+			// Merge wildcard + root into one entry
+			seen[domain] = true
+			seen[root] = true
+			entry := zipDirEntry{DirName: root}
+			if domainSet[root] {
+				entry.Domains = []string{root, domain}
+			} else {
+				entry.Domains = []string{domain}
+			}
+			entries = append(entries, entry)
+		} else {
+			// Check if this root domain's wildcard was already processed
+			if seen[domain] {
+				continue
+			}
+			wildcard := "*." + domain
+			if domainSet[wildcard] {
+				// Will be handled when we process the wildcard
+				continue
+			}
+			// Standalone domain
+			seen[domain] = true
+			entries = append(entries, zipDirEntry{
+				DirName: domain,
+				Domains: []string{domain},
+			})
+		}
+	}
+
+	return entries
 }
 
 func createZipBundleV2(cert model.Certificate, keyPEM []byte) ([]byte, error) {
 	// Parse domains
-	var domains []string
-	if err := json.Unmarshal([]byte(cert.Domains), &domains); err != nil {
-		domains = []string{"certificate"}
+	var allDomains []string
+	if err := json.Unmarshal([]byte(cert.Domains), &allDomains); err != nil {
+		allDomains = []string{"certificate"}
 	}
+
+	entries := mergeDomainsForZip(allDomains)
 
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
 
-	// Create per-domain directories, each containing the certificate files
-	for _, domain := range domains {
-		dir := sanitizeDomainDir(domain)
+	// Create per-entry directories
+	for _, entry := range entries {
+		dir := entry.DirName
 
 		certFile, err := w.Create(dir + "/certificate.pem")
 		if err != nil {
@@ -634,17 +690,21 @@ func createZipBundleV2(cert model.Certificate, keyPEM []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	var domainList strings.Builder
-	for _, d := range domains {
-		domainList.WriteString("  - " + d + "\n")
+	var dirList strings.Builder
+	for _, entry := range entries {
+		dirList.WriteString("  " + entry.DirName + "/")
+		if len(entry.Domains) > 1 {
+			dirList.WriteString("  (covers: " + strings.Join(entry.Domains, ", ") + ")")
+		}
+		dirList.WriteString("\n")
 	}
 
 	readme := fmt.Sprintf(`SSL Certificate Bundle
 ======================
 
-This certificate covers %d domains:
+This certificate covers %d domains, organized into %d directories:
 %s
-Each domain directory contains:
+Each directory contains:
   - certificate.pem: SSL certificate
   - fullchain.pem:   Certificate + intermediate CA chain
   - private.key:     Private key (keep this secure!)
@@ -652,8 +712,8 @@ Each domain directory contains:
 Issued:  %s
 Expires: %s
 
-Note: This is a multi-domain (SAN) certificate. All domains share the
-same certificate files. They are organized per-domain for deployment convenience.
+Note: This is a multi-domain (SAN) certificate. Wildcard domains (*.example.com)
+and their root domains (example.com) are merged into a single directory.
 
 For Nginx:
   ssl_certificate     /path/to/<domain>/fullchain.pem;
@@ -663,7 +723,7 @@ For Apache:
   SSLCertificateFile      /path/to/<domain>/certificate.pem
   SSLCertificateKeyFile   /path/to/<domain>/private.key
   SSLCertificateChainFile /path/to/<domain>/fullchain.pem
-`, len(domains), domainList.String(), cert.IssuedAt, cert.ExpiresAt)
+`, len(allDomains), len(entries), dirList.String(), cert.IssuedAt, cert.ExpiresAt)
 
 	if _, err := readmeFile.Write([]byte(readme)); err != nil {
 		return nil, err

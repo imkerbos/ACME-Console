@@ -405,11 +405,7 @@ async function handleDownload() {
   try {
     const response = await certificateApi.download(id, 'zip')
 
-    // Get domains for filename
-    const domains = parseDomains(certificate.value.domains)
-    const primaryDomain = domains[0] || 'certificate'
-    const suffix = domains.length > 1 ? `_${domains.length}domains` : ''
-    const filename = `${primaryDomain}${suffix}.zip`
+    const filename = `certs_${id}.zip`
 
     // Create download link for blob
     const blob = new Blob([response.data], { type: 'application/zip' })
