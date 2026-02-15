@@ -650,61 +650,62 @@ func createZipBundleV2(cert model.Certificate, keyPEM []byte) ([]byte, error) {
 		allDomains = []string{"certificate"}
 	}
 
+	// For a combined (SAN) certificate, all domains share the same cert/key files.
+	// Use only the first domain as the directory name to avoid redundant copies.
 	entries := mergeDomainsForZip(allDomains)
+	dirName := "certificate"
+	if len(entries) > 0 {
+		dirName = entries[0].DirName
+	}
 
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)
 
-	// Create per-entry directories
-	for _, entry := range entries {
-		dir := entry.DirName
-
-		certFile, err := w.Create(dir + "/certificate.pem")
-		if err != nil {
-			return nil, err
-		}
-		if _, err := certFile.Write([]byte(cert.CertPEM)); err != nil {
-			return nil, err
-		}
-
-		chainFile, err := w.Create(dir + "/fullchain.pem")
-		if err != nil {
-			return nil, err
-		}
-		if _, err := chainFile.Write([]byte(cert.ChainPEM)); err != nil {
-			return nil, err
-		}
-
-		keyFile, err := w.Create(dir + "/private.key")
-		if err != nil {
-			return nil, err
-		}
-		if _, err := keyFile.Write(keyPEM); err != nil {
-			return nil, err
-		}
+	// Create a single directory with the certificate files
+	certFile, err := w.Create(dirName + "/certificate.pem")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := certFile.Write([]byte(cert.CertPEM)); err != nil {
+		return nil, err
 	}
 
-	// Add README at root level
+	chainFile, err := w.Create(dirName + "/fullchain.pem")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := chainFile.Write([]byte(cert.ChainPEM)); err != nil {
+		return nil, err
+	}
+
+	keyFile, err := w.Create(dirName + "/private.key")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := keyFile.Write(keyPEM); err != nil {
+		return nil, err
+	}
+
+	// Add README at root level listing all covered domains
 	readmeFile, err := w.Create("README.txt")
 	if err != nil {
 		return nil, err
 	}
 
-	var dirList strings.Builder
-	for _, entry := range entries {
-		dirList.WriteString("  " + entry.DirName + "/")
-		if len(entry.Domains) > 1 {
-			dirList.WriteString("  (covers: " + strings.Join(entry.Domains, ", ") + ")")
-		}
-		dirList.WriteString("\n")
+	var domainList strings.Builder
+	for _, d := range allDomains {
+		domainList.WriteString("  - " + d + "\n")
 	}
 
 	readme := fmt.Sprintf(`SSL Certificate Bundle
 ======================
 
-This certificate covers %d domains, organized into %d directories:
+This is a multi-domain (SAN) certificate covering %d domains:
 %s
-Each directory contains:
+All domains share the same certificate files, located in:
+  %s/
+
+Directory contents:
   - certificate.pem: SSL certificate
   - fullchain.pem:   Certificate + intermediate CA chain
   - private.key:     Private key (keep this secure!)
@@ -712,18 +713,16 @@ Each directory contains:
 Issued:  %s
 Expires: %s
 
-Note: This is a multi-domain (SAN) certificate. Wildcard domains (*.example.com)
-and their root domains (example.com) are merged into a single directory.
-
 For Nginx:
-  ssl_certificate     /path/to/<domain>/fullchain.pem;
-  ssl_certificate_key /path/to/<domain>/private.key;
+  ssl_certificate     /path/to/%s/fullchain.pem;
+  ssl_certificate_key /path/to/%s/private.key;
 
 For Apache:
-  SSLCertificateFile      /path/to/<domain>/certificate.pem
-  SSLCertificateKeyFile   /path/to/<domain>/private.key
-  SSLCertificateChainFile /path/to/<domain>/fullchain.pem
-`, len(allDomains), len(entries), dirList.String(), cert.IssuedAt, cert.ExpiresAt)
+  SSLCertificateFile      /path/to/%s/certificate.pem
+  SSLCertificateKeyFile   /path/to/%s/private.key
+  SSLCertificateChainFile /path/to/%s/fullchain.pem
+`, len(allDomains), domainList.String(), dirName, cert.IssuedAt, cert.ExpiresAt,
+		dirName, dirName, dirName, dirName, dirName)
 
 	if _, err := readmeFile.Write([]byte(readme)); err != nil {
 		return nil, err

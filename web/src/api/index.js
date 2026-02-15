@@ -94,9 +94,13 @@ export const certificateApi = {
   },
 
   create(data) {
-    // 基础 10s + 每个域名 500ms，最少 10s，最多 180s
     const domainCount = data.domains?.length || 1
-    const timeout = Math.min(Math.max(10000, 10000 + domainCount * 500), 180000)
+    const isIndependent = data.issue_mode === 'independent'
+    // independent: 基础 10s + 每个域名 2000ms，最多 300s
+    // combined:    基础 10s + 每个域名 500ms，最多 180s
+    const perDomain = isIndependent ? 2000 : 500
+    const maxTimeout = isIndependent ? 300000 : 180000
+    const timeout = Math.min(Math.max(10000, 10000 + domainCount * perDomain), maxTimeout)
     return api.post('/certificates', data, { timeout })
   },
 

@@ -143,7 +143,13 @@ export default {
     selectWorkspace: '选择工作空间',
     workspaceOptional: '可选，不选择则为私有证书',
     allCertificates: '全部证书',
-    deleteConfirm: '确定要删除此证书吗？'
+    deleteConfirm: '确定要删除此证书吗？',
+    issueMode: '签发模式',
+    issueModeCombined: '合并签发',
+    issueModeIndependent: '独立签发',
+    issueModeDefault: '默认',
+    issueModeCombinedDesc: '所有域名合并为一张 SAN 证书，适合同一服务器部署多个域名',
+    issueModeIndependentDesc: '每个域名独立签发一张证书，适合不同服务器分别部署'
   },
 
   challenge: {

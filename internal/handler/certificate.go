@@ -29,13 +29,13 @@ func (h *CertificateHandler) Create(c *gin.Context) {
 		return
 	}
 
-	cert, err := h.svc.Create(&req, userID)
+	resp, err := h.svc.Create(&req, userID)
 	if err != nil {
 		response.InternalError(c, err)
 		return
 	}
 
-	response.Created(c, cert)
+	response.Created(c, resp)
 }
 
 // List handles GET /api/v1/certificates

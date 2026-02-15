@@ -143,7 +143,13 @@ export default {
     selectWorkspace: 'Select Workspace',
     workspaceOptional: 'Optional, leave empty for private certificate',
     allCertificates: 'All Certificates',
-    deleteConfirm: 'Are you sure you want to delete this certificate?'
+    deleteConfirm: 'Are you sure you want to delete this certificate?',
+    issueMode: 'Issue Mode',
+    issueModeCombined: 'Combined',
+    issueModeIndependent: 'Independent',
+    issueModeDefault: 'Default',
+    issueModeCombinedDesc: 'All domains merged into one SAN certificate, ideal for single-server deployments',
+    issueModeIndependentDesc: 'Each domain gets its own certificate, ideal for multi-server deployments'
   },
 
   challenge: {

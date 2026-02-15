@@ -21,6 +21,13 @@ const (
 	KeyTypeECC KeyType = "ECC"
 )
 
+type IssueMode string
+
+const (
+	IssueModeCombined    IssueMode = "combined"
+	IssueModeIndependent IssueMode = "independent"
+)
+
 type Certificate struct {
 	ID            uint              `gorm:"primaryKey" json:"id"`
 	AccountID     *uint             `gorm:"index" json:"account_id,omitempty"`       // Foreign key to ACMEAccount
@@ -30,6 +37,7 @@ type Certificate struct {
 	Domains       string            `gorm:"type:json;not null" json:"domains"`       // JSON array: ["example.com", "*.example.com"]
 	KeyType       KeyType           `gorm:"type:varchar(10);not null" json:"key_type"`
 	KeySize       int               `gorm:"default:2048" json:"key_size"`            // RSA: 2048/4096, ECC: 256/384
+	IssueMode     IssueMode         `gorm:"type:varchar(20);not null;default:combined" json:"issue_mode"`
 	Status        CertificateStatus `gorm:"type:varchar(20);not null;default:pending" json:"status"`
 	OrderURL      string            `gorm:"type:varchar(512)" json:"order_url,omitempty"`       // ACME order URL
 	CertPEM       string            `gorm:"type:text" json:"cert_pem,omitempty"`

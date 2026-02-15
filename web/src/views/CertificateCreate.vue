@@ -61,6 +61,33 @@
 
         <div class="form-section">
           <label class="form-label">
+            <span class="label-text">{{ $t('certificate.issueMode') }}</span>
+          </label>
+          <div class="key-type-options">
+            <label class="key-type-option" :class="{ selected: issueMode === 'combined' }">
+              <input type="radio" v-model="issueMode" value="combined" />
+              <div class="option-content">
+                <div class="option-header">
+                  <span class="option-title">{{ $t('certificate.issueModeCombined') }}</span>
+                  <span class="option-badge recommended">{{ $t('certificate.issueModeDefault') }}</span>
+                </div>
+                <p class="option-description">{{ $t('certificate.issueModeCombinedDesc') }}</p>
+              </div>
+            </label>
+            <label class="key-type-option" :class="{ selected: issueMode === 'independent' }">
+              <input type="radio" v-model="issueMode" value="independent" />
+              <div class="option-content">
+                <div class="option-header">
+                  <span class="option-title">{{ $t('certificate.issueModeIndependent') }}</span>
+                </div>
+                <p class="option-description">{{ $t('certificate.issueModeIndependentDesc') }}</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <label class="form-label">
             <span class="label-text">{{ $t('user.email') }}</span>
             <span class="label-required">*</span>
           </label>
@@ -166,6 +193,7 @@ const { getUser } = useAuth()
 const domainsText = ref('')
 const email = ref('')
 const keyType = ref('RSA')
+const issueMode = ref('combined')
 const workspaceId = ref(null)
 const workspaces = ref([])
 const submitting = ref(false)
@@ -215,7 +243,8 @@ async function handleSubmit() {
     const payload = {
       domains,
       email: email.value,
-      key_type: keyType.value
+      key_type: keyType.value,
+      issue_mode: issueMode.value
     }
 
     if (workspaceId.value) {
@@ -224,7 +253,11 @@ async function handleSubmit() {
 
     const response = await certificateApi.create(payload)
 
-    router.push(`/certificates/${response.data.id}`)
+    if (response.data.mode === 'independent') {
+      router.push('/certificates')
+    } else {
+      router.push(`/certificates/${response.data.certificate.id}`)
+    }
   } catch (e) {
     if (e.message?.includes('timeout')) {
       error.value = t('certificate.createTimeout')

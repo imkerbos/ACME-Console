@@ -39,10 +39,18 @@ func NewCertificateServiceWithLego(db *gorm.DB, legoSvc *LegoService) *Certifica
 
 type CreateCertificateRequest struct {
 	Domains     []string `json:"domains" binding:"required,min=1"`
-	Email       string   `json:"email" binding:"required,email"`                 // 申请人邮箱
-	KeyType     string   `json:"key_type" binding:"omitempty,oneof=RSA ECC"`     // 可选，默认 RSA
-	KeySize     int      `json:"key_size,omitempty"`                             // 可选，根据 KeyType 自动设置
-	WorkspaceID *uint    `json:"workspace_id,omitempty"`                         // 可选，NULL=私有证书
+	Email       string   `json:"email" binding:"required,email"`                                     // 申请人邮箱
+	KeyType     string   `json:"key_type" binding:"omitempty,oneof=RSA ECC"`                         // 可选，默认 RSA
+	KeySize     int      `json:"key_size,omitempty"`                                                 // 可选，根据 KeyType 自动设置
+	WorkspaceID *uint    `json:"workspace_id,omitempty"`                                             // 可选，NULL=私有证书
+	IssueMode   string   `json:"issue_mode" binding:"omitempty,oneof=combined independent"`          // 签发模式
+}
+
+// CreateCertificateResponse wraps the result of Create() for both combined and independent modes.
+type CreateCertificateResponse struct {
+	Mode         string              `json:"mode"`
+	Certificate  *model.Certificate  `json:"certificate,omitempty"`
+	Certificates []model.Certificate `json:"certificates,omitempty"`
 }
 
 type CertificateResponse struct {
@@ -64,22 +72,74 @@ type ChallengeResponse struct {
 	Status   string `json:"status"`
 }
 
-func (s *CertificateService) Create(req *CreateCertificateRequest, userID uint) (*model.Certificate, error) {
+func (s *CertificateService) Create(req *CreateCertificateRequest, userID uint) (*CreateCertificateResponse, error) {
 	// 设置默认值
 	if req.KeyType == "" {
-		req.KeyType = "RSA" // 默认 RSA
+		req.KeyType = "RSA"
 	}
 	if req.KeySize == 0 {
 		if req.KeyType == "ECC" {
-			req.KeySize = 256 // ECC 默认 P-256
+			req.KeySize = 256
 		} else {
-			req.KeySize = 2048 // RSA 默认 2048
+			req.KeySize = 2048
 		}
 	}
+	if req.IssueMode == "" {
+		req.IssueMode = string(model.IssueModeCombined)
+	}
 
-	// 规范化域名：通配符域名自动包含根域名
+	if req.IssueMode == string(model.IssueModeIndependent) {
+		return s.createIndependent(req, userID)
+	}
+	return s.createCombined(req, userID)
+}
+
+// createCombined creates a single SAN certificate covering all domains.
+func (s *CertificateService) createCombined(req *CreateCertificateRequest, userID uint) (*CreateCertificateResponse, error) {
 	domains := normalizeDomains(req.Domains)
+	cert, err := s.createSingleCert(req, userID, domains, model.IssueModeCombined)
+	if err != nil {
+		return nil, err
+	}
+	return &CreateCertificateResponse{
+		Mode:        string(model.IssueModeCombined),
+		Certificate: cert,
+	}, nil
+}
 
+// createIndependent creates one certificate per domain group (root+wildcard merged).
+func (s *CertificateService) createIndependent(req *CreateCertificateRequest, userID uint) (*CreateCertificateResponse, error) {
+	allDomains := normalizeDomains(req.Domains)
+	groups := groupDomainsForIndependent(allDomains)
+
+	var certs []model.Certificate
+	for _, group := range groups {
+		cert, err := s.createSingleCert(req, userID, group, model.IssueModeIndependent)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create certificate for %v: %w", group, err)
+		}
+		certs = append(certs, *cert)
+	}
+
+	return &CreateCertificateResponse{
+		Mode:         string(model.IssueModeIndependent),
+		Certificates: certs,
+	}, nil
+}
+
+// groupDomainsForIndependent splits domains into groups using mergeDomainsForZip logic.
+// Each group becomes an independent certificate.
+func groupDomainsForIndependent(domains []string) [][]string {
+	entries := mergeDomainsForZip(domains)
+	groups := make([][]string, len(entries))
+	for i, entry := range entries {
+		groups[i] = entry.Domains
+	}
+	return groups
+}
+
+// createSingleCert creates one certificate record with the given domains.
+func (s *CertificateService) createSingleCert(req *CreateCertificateRequest, userID uint, domains []string, issueMode model.IssueMode) (*model.Certificate, error) {
 	domainsJSON, err := json.Marshal(domains)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal domains: %w", err)
@@ -91,6 +151,7 @@ func (s *CertificateService) Create(req *CreateCertificateRequest, userID uint) 
 		Domains:     string(domainsJSON),
 		KeyType:     model.KeyType(req.KeyType),
 		KeySize:     req.KeySize,
+		IssueMode:   issueMode,
 		Status:      model.CertificateStatusPending,
 		WorkspaceID: req.WorkspaceID,
 		CreatedBy:   &createdByID,
@@ -101,26 +162,20 @@ func (s *CertificateService) Create(req *CreateCertificateRequest, userID uint) 
 	}
 
 	if s.useLego && s.legoSvc != nil {
-		// Use real ACME flow - create order and get challenges from CA
 		if err := s.legoSvc.CreateOrder(cert.ID, req.Email, domains, req.KeyType, req.KeySize); err != nil {
-			// If ACME fails, we might still have challenges stored
-			// Reload to see what we have
 			if reloadErr := s.db.Preload("Challenges").First(cert, cert.ID).Error; reloadErr != nil {
 				return nil, fmt.Errorf("failed to create ACME order: %w", err)
 			}
-			// If we have challenges, return the cert with pending status
 			if len(cert.Challenges) > 0 {
 				return cert, nil
 			}
 			return nil, fmt.Errorf("failed to create ACME order: %w", err)
 		}
 	} else {
-		// Use mock challenges (legacy behavior)
 		challenges, err := s.acmeSvc.GenerateChallenges(cert.ID, domains)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate challenges: %w", err)
 		}
-
 		for _, ch := range challenges {
 			if err := s.db.Create(&ch).Error; err != nil {
 				return nil, fmt.Errorf("failed to create challenge: %w", err)
@@ -128,7 +183,6 @@ func (s *CertificateService) Create(req *CreateCertificateRequest, userID uint) 
 		}
 	}
 
-	// Reload with challenges
 	if err := s.db.Preload("Challenges").First(cert, cert.ID).Error; err != nil {
 		return nil, err
 	}
@@ -373,22 +427,24 @@ Do not use in production.
 		return []byte(mockCert), "fullchain.pem", nil
 
 	case "zip":
+		// For a combined (SAN) certificate, use a single directory
 		entries := mergeDomainsForZip(domains)
+		dirName := "certificate"
+		if len(entries) > 0 {
+			dirName = entries[0].DirName
+		}
 
 		var buf bytes.Buffer
 		w := zip.NewWriter(&buf)
 
-		// Create merged per-domain directories
-		for _, entry := range entries {
-			certFile, _ := w.Create(entry.DirName + "/certificate.pem")
-			certFile.Write([]byte(mockCert))
+		certFile, _ := w.Create(dirName + "/certificate.pem")
+		certFile.Write([]byte(mockCert))
 
-			chainFile, _ := w.Create(entry.DirName + "/fullchain.pem")
-			chainFile.Write([]byte(mockCert))
+		chainFile, _ := w.Create(dirName + "/fullchain.pem")
+		chainFile.Write([]byte(mockCert))
 
-			keyFile, _ := w.Create(entry.DirName + "/private.key")
-			keyFile.Write([]byte(mockKey))
-		}
+		keyFile, _ := w.Create(dirName + "/private.key")
+		keyFile.Write([]byte(mockKey))
 
 		readmeFile, _ := w.Create("README.txt")
 		readmeFile.Write([]byte(fmt.Sprintf(`MOCK CERTIFICATE BUNDLE
@@ -396,13 +452,13 @@ Do not use in production.
 This is a mock certificate bundle for testing purposes.
 To use real certificates, configure ACME settings in the admin panel.
 
-Domains: %s (%d directories)
+Domains: %s (1 directory: %s/)
 
-Each directory contains:
+Directory contains:
 - certificate.pem: Certificate file
 - fullchain.pem: Full certificate chain
 - private.key: Private key file
-`, strings.Join(domains, ", "), len(entries))))
+`, strings.Join(domains, ", "), dirName)))
 
 		w.Close()
 		return buf.Bytes(), "certificate.zip", nil
