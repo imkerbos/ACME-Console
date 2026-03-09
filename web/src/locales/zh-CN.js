@@ -125,7 +125,8 @@ export default {
     issued: '签发时间',
     expires: '过期时间',
     expiresIn: '剩余 {days} 天',
-    daysLeft: '({days} 天)',
+    daysLeft: '剩余 {days} 天',
+    expired: '已过期',
     expiringSoon: '即将过期',
     searchPlaceholder: '搜索域名...',
     noCertificates: '暂无证书',
@@ -150,6 +151,32 @@ export default {
     issueModeDefault: '默认',
     issueModeCombinedDesc: '所有域名合并为一张 SAN 证书，适合同一服务器部署多个域名',
     issueModeIndependentDesc: '每个域名独立签发一张证书，适合不同服务器分别部署'
+  },
+
+  renewal: {
+    autoRenew: '自动续期',
+    enableAutoRenew: '开启自动续期',
+    disableAutoRenew: '关闭自动续期',
+    renewBeforeDays: '提前续期天数',
+    renewBeforeDaysHint: '在证书过期前 N 天自动发起续期',
+    renewNow: '立即续期',
+    renewalStatus: '续期状态',
+    statusIdle: '空闲',
+    statusPending: '等待 DNS',
+    statusDnsReady: 'DNS 已就绪',
+    statusCompleted: '已完成',
+    statusFailed: '失败',
+    renewalLogs: '续期日志',
+    noLogs: '暂无续期记录',
+    action: '操作',
+    message: '详情',
+    time: '时间',
+    oldExpires: '原过期时间',
+    newExpires: '新过期时间',
+    autoRenewEnabled: '自动续期已开启',
+    autoRenewDisabled: '自动续期已关闭',
+    renewalInitiated: '续期已发起',
+    attempts: '重试次数'
   },
 
   challenge: {

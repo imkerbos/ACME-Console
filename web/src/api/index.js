@@ -154,6 +154,21 @@ export const certificateApi = {
     return api.get(`/certificates/${id}/challenges/export`, {
       responseType: 'text'
     })
+  },
+
+  enableAutoRenew(id, enabled, renewBeforeDays) {
+    return api.put(`/certificates/${id}/auto-renew`, {
+      enabled,
+      renew_before_days: renewBeforeDays
+    })
+  },
+
+  triggerRenewal(id) {
+    return api.post(`/certificates/${id}/renew`)
+  },
+
+  getRenewalLogs(id, limit = 50) {
+    return api.get(`/certificates/${id}/renewal-logs`, { params: { limit } })
   }
 }
 

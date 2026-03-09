@@ -12,11 +12,12 @@ import (
 )
 
 type CertificateHandler struct {
-	svc *service.CertificateService
+	svc        *service.CertificateService
+	renewalSvc *service.RenewalService
 }
 
-func NewCertificateHandler(svc *service.CertificateService) *CertificateHandler {
-	return &CertificateHandler{svc: svc}
+func NewCertificateHandler(svc *service.CertificateService, renewalSvc *service.RenewalService) *CertificateHandler {
+	return &CertificateHandler{svc: svc, renewalSvc: renewalSvc}
 }
 
 // Create handles POST /api/v1/certificates
@@ -201,4 +202,65 @@ func (h *CertificateHandler) Delete(c *gin.Context) {
 	}
 
 	response.OK(c, "certificate deleted successfully")
+}
+
+// EnableAutoRenew handles PUT /api/v1/certificates/:id/auto-renew
+func (h *CertificateHandler) EnableAutoRenew(c *gin.Context) {
+	id, err := utils.ParseID(c)
+	if err != nil {
+		response.BadRequest(c, "invalid certificate id")
+		return
+	}
+
+	var req struct {
+		Enabled         bool `json:"enabled"`
+		RenewBeforeDays int  `json:"renew_before_days"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.ValidationError(c, err)
+		return
+	}
+
+	if err := h.svc.EnableAutoRenew(id, req.Enabled, req.RenewBeforeDays); err != nil {
+		response.InternalError(c, err)
+		return
+	}
+
+	response.OK(c, "auto-renew updated")
+}
+
+// Renew handles POST /api/v1/certificates/:id/renew
+func (h *CertificateHandler) Renew(c *gin.Context) {
+	id, err := utils.ParseID(c)
+	if err != nil {
+		response.BadRequest(c, "invalid certificate id")
+		return
+	}
+
+	if err := h.renewalSvc.TriggerRenewal(id); err != nil {
+		response.InternalError(c, err)
+		return
+	}
+
+	response.OK(c, "renewal initiated")
+}
+
+// RenewalLogs handles GET /api/v1/certificates/:id/renewal-logs
+func (h *CertificateHandler) RenewalLogs(c *gin.Context) {
+	id, err := utils.ParseID(c)
+	if err != nil {
+		response.BadRequest(c, "invalid certificate id")
+		return
+	}
+
+	limitStr := c.DefaultQuery("limit", "50")
+	limit, _ := strconv.Atoi(limitStr)
+
+	logs, err := h.svc.GetRenewalLogs(id, limit)
+	if err != nil {
+		response.InternalError(c, err)
+		return
+	}
+
+	response.Success(c, logs)
 }

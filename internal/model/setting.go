@@ -13,6 +13,9 @@ const (
 	SettingDNSTimeout   = "dns.timeout"   // DNS 查询超时，如 "10s"
 	SettingSiteTitle    = "site.title"    // 网站标题
 	SettingSiteSubtitle = "site.subtitle" // 网站副标题
+	SettingRenewalEnabled     = "renewal.enabled"      // 全局续期开关
+	SettingRenewalDefaultDays = "renewal.default_days"  // 默认提前续期天数
+	SettingRenewalMaxAttempts = "renewal.max_attempts"  // 最大重试次数
 )
 
 // Setting 系统配置表
@@ -42,6 +45,9 @@ var defaultSettings = map[string]struct {
 	SettingDNSTimeout:   {"10s", "DNS 查询超时时间"},
 	SettingSiteTitle:    {"ACME Console", "网站标题"},
 	SettingSiteSubtitle: {"证书管理系统", "网站副标题"},
+	SettingRenewalEnabled:     {"true", "全局自动续期开关"},
+	SettingRenewalDefaultDays: {"30", "默认提前续期天数"},
+	SettingRenewalMaxAttempts: {"3", "续期最大重试次数"},
 }
 
 // InitDefaultSettings 初始化默认配置

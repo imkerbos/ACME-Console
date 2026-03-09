@@ -465,6 +465,57 @@ func (s *NotificationService) ListLogs(certificateID uint, limit int) ([]model.N
 	return logs, nil
 }
 
+// SendRenewalNotification sends renewal-related notifications to all enabled configs for a certificate.
+// eventType: "renewal_started", "renewal_completed", "renewal_failed"
+func (s *NotificationService) SendRenewalNotification(certID uint, eventType string) {
+	var cert model.Certificate
+	if err := s.db.First(&cert, certID).Error; err != nil {
+		fmt.Printf("SendRenewalNotification: failed to load cert %d: %v\n", certID, err)
+		return
+	}
+
+	// Find all enabled notification configs that cover this certificate
+	var configs []model.NotificationConfig
+	s.db.Where("enabled = ? AND (certificate_id = ? OR certificate_id IS NULL)", true, certID).
+		Find(&configs)
+
+	domains := s.parseDomains(cert.Domains)
+	domainStr := ""
+	if len(domains) > 0 {
+		domainStr = domains[0]
+	}
+
+	for _, config := range configs {
+		var message string
+		switch eventType {
+		case "renewal_started":
+			message = fmt.Sprintf("Certificate #%d (%s) renewal started. Please update DNS TXT records.", cert.ID, domainStr)
+		case "renewal_completed":
+			expiresStr := "N/A"
+			if cert.ExpiresAt != nil {
+				expiresStr = cert.ExpiresAt.Format("2006-01-02")
+			}
+			message = fmt.Sprintf("Certificate #%d (%s) renewed successfully. New expiry: %s", cert.ID, domainStr, expiresStr)
+		case "renewal_failed":
+			message = fmt.Sprintf("Certificate #%d (%s) renewal failed (attempt %d).", cert.ID, domainStr, cert.RenewalAttempts)
+		default:
+			continue
+		}
+
+		payload := map[string]any{
+			"event":     eventType,
+			"cert_id":   cert.ID,
+			"domains":   domains,
+			"message":   message,
+			"timestamp": time.Now().Unix(),
+		}
+
+		if err := s.sendHTTPPost(config.WebhookURL, payload); err != nil {
+			fmt.Printf("SendRenewalNotification: failed to send to config %d: %v\n", config.ID, err)
+		}
+	}
+}
+
 // TestWebhook sends a test notification
 func (s *NotificationService) TestWebhook(configID uint) error {
 	config, err := s.GetConfig(configID)

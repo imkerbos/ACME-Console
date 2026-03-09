@@ -80,6 +80,9 @@ func Setup(handlers *Handlers, jwtManager *auth.JWTManager, staticFS fs.FS) *gin
 				certs.POST("/:id/pre-verify", handlers.Certificate.PreVerify)
 				certs.POST("/:id/verify", handlers.Certificate.Verify)
 				certs.GET("/:id/download", handlers.Certificate.Download)
+				certs.PUT("/:id/auto-renew", handlers.Certificate.EnableAutoRenew)
+				certs.POST("/:id/renew", handlers.Certificate.Renew)
+				certs.GET("/:id/renewal-logs", handlers.Certificate.RenewalLogs)
 				certs.GET("/:id/notification-logs", handlers.Notification.ListLogs)
 
 				// Challenge endpoints (nested under certificates)

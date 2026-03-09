@@ -80,12 +80,21 @@
                 <span class="status-dot"></span>
                 {{ $t(`certificate.${cert.status}`) }}
               </span>
+              <span v-if="cert.auto_renew && cert.renewal_status && cert.renewal_status !== 'idle'" :class="['status-badge', 'status-badge-sm', `renewal-status-${cert.renewal_status}`]">
+                {{ $t(`renewal.status${capitalizeStatus(cert.renewal_status)}`) }}
+              </span>
+              <span v-else-if="cert.auto_renew" class="auto-renew-icon" :title="$t('renewal.autoRenew')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                  <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+              </span>
             </td>
             <td class="cell-date">{{ formatDate(cert.created_at) }}</td>
             <td class="cell-date">
-              <span v-if="cert.expires_at" :class="{ 'text-warning': isExpiringSoon(cert.expires_at) }">
-                {{ formatDate(cert.expires_at) }}
-              </span>
+              <div v-if="cert.expires_at" class="expiry-cell">
+                <span>{{ formatDate(cert.expires_at) }}</span>
+                <span :class="['expiry-badge', expiryBadgeClass(cert.expires_at)]">{{ expiryLabel(cert.expires_at) }}</span>
+              </div>
               <span v-else class="text-muted">-</span>
             </td>
             <td class="cell-actions">
@@ -298,12 +307,27 @@ function formatDate(dateStr) {
   })
 }
 
-function isExpiringSoon(dateStr) {
-  if (!dateStr) return false
+function getDaysUntilExpiry(dateStr) {
+  if (!dateStr) return null
   const expires = new Date(dateStr)
   const now = new Date()
-  const daysUntilExpiry = (expires - now) / (1000 * 60 * 60 * 24)
-  return daysUntilExpiry < 30
+  return Math.ceil((expires - now) / (1000 * 60 * 60 * 24))
+}
+
+function expiryBadgeClass(dateStr) {
+  const days = getDaysUntilExpiry(dateStr)
+  if (days === null) return ''
+  if (days < 0) return 'badge-expired'
+  if (days < 7) return 'badge-critical'
+  if (days < 30) return 'badge-warning'
+  return 'badge-ok'
+}
+
+function expiryLabel(dateStr) {
+  const days = getDaysUntilExpiry(dateStr)
+  if (days === null) return ''
+  if (days < 0) return t('certificate.expired')
+  return t('certificate.daysLeft', { days })
 }
 
 function confirmDelete(cert) {
@@ -323,6 +347,11 @@ async function handleDelete() {
   } finally {
     deleting.value = false
   }
+}
+
+function capitalizeStatus(str) {
+  if (!str) return ''
+  return str.split('_').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('')
 }
 
 onMounted(() => {
@@ -567,6 +596,41 @@ onMounted(() => {
 .text-warning {
   color: #D97706;
   font-weight: 500;
+}
+
+.expiry-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.expiry-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.badge-ok {
+  background: #ECFDF5;
+  color: #059669;
+}
+
+.badge-warning {
+  background: #FFFBEB;
+  color: #D97706;
+}
+
+.badge-critical {
+  background: #FEF2F2;
+  color: #DC2626;
+}
+
+.badge-expired {
+  background: #FEE2E2;
+  color: #991B1B;
 }
 
 .text-muted {
@@ -819,4 +883,23 @@ onMounted(() => {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+.status-badge-sm {
+  font-size: 0.625rem;
+  padding: 0.0625rem 0.375rem;
+  margin-left: 0.25rem;
+}
+
+.auto-renew-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.375rem;
+  color: #10B981;
+  vertical-align: middle;
+}
+
+.renewal-status-pending { background: #FEF3C7; color: #92400E; }
+.renewal-status-dns_ready { background: #DBEAFE; color: #1E40AF; }
+.renewal-status-completed { background: #D1FAE5; color: #065F46; }
+.renewal-status-failed { background: #FEE2E2; color: #991B1B; }
 </style>

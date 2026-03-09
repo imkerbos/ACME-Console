@@ -28,6 +28,16 @@ const (
 	IssueModeIndependent IssueMode = "independent"
 )
 
+type RenewalStatus string
+
+const (
+	RenewalStatusIdle      RenewalStatus = "idle"
+	RenewalStatusPending   RenewalStatus = "pending"   // Waiting for DNS update
+	RenewalStatusDNSReady  RenewalStatus = "dns_ready"  // DNS verified, ready to finalize
+	RenewalStatusCompleted RenewalStatus = "completed"
+	RenewalStatusFailed    RenewalStatus = "failed"
+)
+
 type Certificate struct {
 	ID            uint              `gorm:"primaryKey" json:"id"`
 	AccountID     *uint             `gorm:"index" json:"account_id,omitempty"`       // Foreign key to ACMEAccount
@@ -48,6 +58,11 @@ type Certificate struct {
 	Fingerprint   string            `gorm:"type:varchar(64)" json:"fingerprint,omitempty"`      // SHA-256 fingerprint
 	IssuedAt      *time.Time        `json:"issued_at,omitempty"`
 	ExpiresAt     *time.Time        `json:"expires_at,omitempty"`
+	AutoRenew       bool            `gorm:"default:false" json:"auto_renew"`
+	RenewalStatus   RenewalStatus   `gorm:"type:varchar(20);default:idle" json:"renewal_status"`
+	RenewalAttempts int             `gorm:"default:0" json:"renewal_attempts"`
+	LastRenewalAt   *time.Time      `json:"last_renewal_at,omitempty"`
+	RenewBeforeDays int             `gorm:"default:30" json:"renew_before_days"`
 	CreatedAt     time.Time         `json:"created_at"`
 	UpdatedAt     time.Time         `json:"updated_at"`
 	Account       *ACMEAccount      `gorm:"foreignKey:AccountID" json:"-"`

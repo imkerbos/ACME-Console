@@ -125,7 +125,8 @@ export default {
     issued: 'Issued',
     expires: 'Expires',
     expiresIn: '{days} days left',
-    daysLeft: '({days} days)',
+    daysLeft: '{days}d left',
+    expired: 'Expired',
     expiringSoon: 'Expiring soon',
     searchPlaceholder: 'Search domains...',
     noCertificates: 'No certificates found',
@@ -150,6 +151,32 @@ export default {
     issueModeDefault: 'Default',
     issueModeCombinedDesc: 'All domains merged into one SAN certificate, ideal for single-server deployments',
     issueModeIndependentDesc: 'Each domain gets its own certificate, ideal for multi-server deployments'
+  },
+
+  renewal: {
+    autoRenew: 'Auto Renew',
+    enableAutoRenew: 'Enable Auto Renew',
+    disableAutoRenew: 'Disable Auto Renew',
+    renewBeforeDays: 'Renew Before Days',
+    renewBeforeDaysHint: 'Automatically renew N days before certificate expires',
+    renewNow: 'Renew Now',
+    renewalStatus: 'Renewal Status',
+    statusIdle: 'Idle',
+    statusPending: 'Waiting for DNS',
+    statusDnsReady: 'DNS Ready',
+    statusCompleted: 'Completed',
+    statusFailed: 'Failed',
+    renewalLogs: 'Renewal Logs',
+    noLogs: 'No renewal logs',
+    action: 'Action',
+    message: 'Details',
+    time: 'Time',
+    oldExpires: 'Old Expiry',
+    newExpires: 'New Expiry',
+    autoRenewEnabled: 'Auto renew enabled',
+    autoRenewDisabled: 'Auto renew disabled',
+    renewalInitiated: 'Renewal initiated',
+    attempts: 'Attempts'
   },
 
   challenge: {

@@ -96,10 +96,13 @@ func main() {
 		logger.Info("Using mock ACME service (no encryption key configured)")
 	}
 
+	// Initialize renewal service
+	renewalSvc := service.NewRenewalService(db, certSvc, notificationSvc, settingSvc)
+
 	// Initialize handlers
 	handlers := &router.Handlers{
 		Auth:         handler.NewAuthHandler(db, jwtManager),
-		Certificate:  handler.NewCertificateHandler(certSvc),
+		Certificate:  handler.NewCertificateHandler(certSvc, renewalSvc),
 		Challenge:    handler.NewChallengeHandler(certSvc),
 		User:         handler.NewUserHandler(db),
 		Setting:      handler.NewSettingHandler(settingSvc),
@@ -117,8 +120,8 @@ func main() {
 	// Setup router
 	r := router.Setup(handlers, jwtManager, staticFS)
 
-	// Start notification scheduler
-	notifScheduler := scheduler.NewScheduler(notificationSvc)
+	// Start notification and renewal scheduler
+	notifScheduler := scheduler.NewScheduler(notificationSvc, renewalSvc)
 	notifScheduler.Start()
 	defer notifScheduler.Stop()
 

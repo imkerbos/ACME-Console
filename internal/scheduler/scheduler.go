@@ -10,14 +10,16 @@ import (
 // Scheduler handles periodic tasks
 type Scheduler struct {
 	notificationSvc *service.NotificationService
+	renewalSvc      *service.RenewalService
 	stopChan        chan struct{}
 	interval        time.Duration
 }
 
 // NewScheduler creates a new scheduler
-func NewScheduler(notificationSvc *service.NotificationService) *Scheduler {
+func NewScheduler(notificationSvc *service.NotificationService, renewalSvc *service.RenewalService) *Scheduler {
 	return &Scheduler{
 		notificationSvc: notificationSvc,
+		renewalSvc:      renewalSvc,
 		stopChan:        make(chan struct{}),
 		interval:        6 * time.Hour, // Check every 6 hours
 	}
@@ -31,6 +33,7 @@ func (s *Scheduler) Start() {
 
 	// Run immediately on start
 	go s.runNotificationCheck()
+	go s.runRenewalCheck()
 
 	// Then run periodically
 	ticker := time.NewTicker(s.interval)
@@ -39,6 +42,7 @@ func (s *Scheduler) Start() {
 			select {
 			case <-ticker.C:
 				s.runNotificationCheck()
+				s.runRenewalCheck()
 			case <-s.stopChan:
 				ticker.Stop()
 				logger.Info("Notification scheduler stopped")
@@ -62,5 +66,20 @@ func (s *Scheduler) runNotificationCheck() {
 		)
 	} else {
 		logger.Info("Certificate expiry notification check completed")
+	}
+}
+
+func (s *Scheduler) runRenewalCheck() {
+	if s.renewalSvc == nil {
+		return
+	}
+	logger.Info("Running certificate renewal check")
+
+	if err := s.renewalSvc.CheckAndRenew(); err != nil {
+		logger.Error("Failed to check and renew",
+			logger.Err(err),
+		)
+	} else {
+		logger.Info("Certificate renewal check completed")
 	}
 }

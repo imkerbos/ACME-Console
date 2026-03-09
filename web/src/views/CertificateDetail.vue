@@ -180,7 +180,7 @@
         </div>
 
         <div class="challenge-list">
-          <div v-for="challenge in certificate.challenges" :key="challenge.id" class="challenge-item">
+          <div v-for="challenge in sortedChallenges" :key="challenge.id" class="challenge-item">
             <div class="challenge-header">
               <span class="challenge-domain">{{ challenge.domain }}</span>
               <span :class="['status-badge', `status-${challenge.status}`]">
@@ -314,6 +314,62 @@
           </button>
         </div>
       </div>
+
+      <!-- Auto Renewal Card (when ready) -->
+      <div v-if="certificate.status === 'ready'" class="detail-card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          {{ $t('renewal.autoRenew') }}
+        </div>
+        <div class="renewal-controls">
+          <div class="renewal-toggle-row">
+            <label class="toggle-label">
+              <input type="checkbox" :checked="certificate.auto_renew" @change="handleToggleAutoRenew" :disabled="togglingRenew">
+              <span class="toggle-text">{{ certificate.auto_renew ? $t('renewal.autoRenewEnabled') : $t('renewal.disableAutoRenew') }}</span>
+            </label>
+            <button v-if="certificate.status === 'ready'" class="btn btn-secondary btn-sm" :disabled="renewingNow" @click="handleRenewNow">
+              <span v-if="renewingNow" class="btn-spinner"></span>
+              {{ renewingNow ? $t('common.loading') : $t('renewal.renewNow') }}
+            </button>
+          </div>
+          <div v-if="certificate.auto_renew" class="renewal-days-row">
+            <label class="days-label">{{ $t('renewal.renewBeforeDays') }}</label>
+            <input type="number" v-model.number="renewBeforeDays" min="1" max="90" class="days-input" @change="handleUpdateDays">
+            <span class="days-hint">{{ $t('renewal.renewBeforeDaysHint') }}</span>
+          </div>
+          <div v-if="certificate.renewal_status && certificate.renewal_status !== 'idle'" class="renewal-status-row">
+            <span class="renewal-status-label">{{ $t('renewal.renewalStatus') }}:</span>
+            <span :class="['status-badge', `renewal-status-${certificate.renewal_status}`]">
+              <span class="status-dot"></span>
+              {{ $t(`renewal.status${capitalize(certificate.renewal_status)}`) }}
+            </span>
+            <span v-if="certificate.renewal_attempts > 0" class="renewal-attempts">
+              ({{ $t('renewal.attempts') }}: {{ certificate.renewal_attempts }})
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Renewal Logs Card -->
+      <div v-if="certificate.status === 'ready' && renewalLogs.length > 0" class="detail-card">
+        <div class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+          </svg>
+          {{ $t('renewal.renewalLogs') }}
+        </div>
+        <div class="renewal-log-list">
+          <div v-for="log in renewalLogs" :key="log.id" class="renewal-log-item">
+            <div class="log-header">
+              <span :class="['log-action', `log-${log.status}`]">{{ log.action }}</span>
+              <span class="log-time">{{ formatDateTime(log.created_at) }}</span>
+            </div>
+            <div class="log-message">{{ log.message }}</div>
+          </div>
+        </div>
+      </div>
     </template>
   </div>
 </template>
@@ -335,10 +391,26 @@ const verifying = ref(false)
 const checking = ref(false)
 const dnsCheckResults = ref(null)
 const showDNSCheckModal = ref(false)
+const togglingRenew = ref(false)
+const renewingNow = ref(false)
+const renewBeforeDays = ref(30)
+const renewalLogs = ref([])
 
 const allDNSMatched = computed(() => {
   if (!dnsCheckResults.value) return false
   return dnsCheckResults.value.every(r => r.matched)
+})
+
+// Sort challenges grouped by base domain (txt_host), root before wildcard within each group.
+const sortedChallenges = computed(() => {
+  if (!certificate.value?.challenges) return []
+  return [...certificate.value.challenges].sort((a, b) => {
+    if (a.txt_host !== b.txt_host) return a.txt_host.localeCompare(b.txt_host)
+    // same txt_host: root domain (no "*.") before wildcard
+    const aWild = a.domain.startsWith('*.')
+    const bWild = b.domain.startsWith('*.')
+    return aWild - bWild
+  })
 })
 
 const isExpiringSoon = computed(() => {
@@ -422,10 +494,60 @@ async function handleDownload() {
   }
 }
 
+async function handleToggleAutoRenew() {
+  togglingRenew.value = true
+  try {
+    const newVal = !certificate.value.auto_renew
+    await certificateApi.enableAutoRenew(id, newVal, renewBeforeDays.value)
+    certificate.value.auto_renew = newVal
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    togglingRenew.value = false
+  }
+}
+
+async function handleUpdateDays() {
+  try {
+    await certificateApi.enableAutoRenew(id, certificate.value.auto_renew, renewBeforeDays.value)
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+async function handleRenewNow() {
+  renewingNow.value = true
+  error.value = null
+  try {
+    await certificateApi.triggerRenewal(id)
+    await loadCertificate()
+    await loadRenewalLogs()
+  } catch (e) {
+    error.value = e.message
+  } finally {
+    renewingNow.value = false
+  }
+}
+
+async function loadRenewalLogs() {
+  try {
+    const response = await certificateApi.getRenewalLogs(id)
+    renewalLogs.value = response.data || []
+  } catch (e) {
+    // silent fail for logs
+  }
+}
+
+function capitalize(str) {
+  if (!str) return ''
+  // Handle snake_case like dns_ready -> DnsReady
+  return str.split('_').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('')
+}
+
 function copyAllChallenges() {
   if (!certificate.value?.challenges) return
 
-  const text = certificate.value.challenges.map(c =>
+  const text = sortedChallenges.value.map(c =>
     `# ${c.domain}\n${c.txt_host}. 300 IN TXT "${c.txt_value}"`
   ).join('\n\n')
 
@@ -466,8 +588,14 @@ function formatDateTime(dateStr) {
   })
 }
 
-onMounted(() => {
-  loadCertificate()
+onMounted(async () => {
+  await loadCertificate()
+  if (certificate.value) {
+    renewBeforeDays.value = certificate.value.renew_before_days || 30
+    if (certificate.value.status === 'ready') {
+      loadRenewalLogs()
+    }
+  }
 })
 </script>
 
@@ -1324,5 +1452,154 @@ onMounted(() => {
   gap: 0.75rem;
   padding: 1.5rem;
   border-top: 1px solid #E5E7EB;
+}
+
+/* Renewal Controls */
+.renewal-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.renewal-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+}
+
+.toggle-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #10B981;
+}
+
+.toggle-text {
+  font-size: 0.875rem;
+  color: #374151;
+}
+
+.renewal-days-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: #F9FAFB;
+  border-radius: 8px;
+}
+
+.days-label {
+  font-size: 0.875rem;
+  color: #374151;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.days-input {
+  width: 80px;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid #E5E7EB;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.days-input:focus {
+  outline: none;
+  border-color: #10B981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+}
+
+.days-hint {
+  font-size: 0.75rem;
+  color: #9CA3AF;
+}
+
+.renewal-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.renewal-status-label {
+  font-size: 0.875rem;
+  color: #6B7280;
+}
+
+.renewal-attempts {
+  font-size: 0.75rem;
+  color: #9CA3AF;
+}
+
+.renewal-status-pending {
+  background: #FEF3C7;
+  color: #92400E;
+}
+.renewal-status-pending .status-dot { background: #F59E0B; }
+
+.renewal-status-dns_ready {
+  background: #DBEAFE;
+  color: #1E40AF;
+}
+.renewal-status-dns_ready .status-dot { background: #3B82F6; }
+
+.renewal-status-completed {
+  background: #D1FAE5;
+  color: #065F46;
+}
+.renewal-status-completed .status-dot { background: #10B981; }
+
+.renewal-status-failed {
+  background: #FEE2E2;
+  color: #991B1B;
+}
+.renewal-status-failed .status-dot { background: #EF4444; }
+
+/* Renewal Logs */
+.renewal-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.renewal-log-item {
+  padding: 0.75rem 1rem;
+  background: #F9FAFB;
+  border-radius: 8px;
+  border: 1px solid #F3F4F6;
+}
+
+.log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.375rem;
+}
+
+.log-action {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  padding: 0.125rem 0.5rem;
+  border-radius: 4px;
+}
+
+.log-success { background: #D1FAE5; color: #065F46; }
+.log-failed { background: #FEE2E2; color: #991B1B; }
+
+.log-time {
+  font-size: 0.75rem;
+  color: #9CA3AF;
+}
+
+.log-message {
+  font-size: 0.8125rem;
+  color: #6B7280;
 }
 </style>

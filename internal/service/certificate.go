@@ -541,3 +541,41 @@ func (s *CertificateService) Delete(id uint) error {
 
 	return nil
 }
+
+// EnableAutoRenew toggles auto-renewal for a certificate and sets renew_before_days.
+func (s *CertificateService) EnableAutoRenew(certID uint, enabled bool, days int) error {
+	var cert model.Certificate
+	if err := s.db.First(&cert, certID).Error; err != nil {
+		return fmt.Errorf("certificate not found: %w", err)
+	}
+
+	updates := map[string]any{
+		"auto_renew": enabled,
+	}
+	if days > 0 {
+		updates["renew_before_days"] = days
+	}
+	// Reset renewal status when toggling
+	if enabled && cert.RenewalStatus == model.RenewalStatusCompleted {
+		updates["renewal_status"] = model.RenewalStatusIdle
+	}
+
+	return s.db.Model(&cert).Updates(updates).Error
+}
+
+// GetRenewalLogs returns renewal audit logs for a certificate.
+func (s *CertificateService) GetRenewalLogs(certID uint, limit int) ([]model.RenewalLog, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var logs []model.RenewalLog
+	if err := s.db.Where("certificate_id = ?", certID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&logs).Error; err != nil {
+		return nil, fmt.Errorf("failed to query renewal logs: %w", err)
+	}
+
+	return logs, nil
+}

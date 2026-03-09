@@ -51,6 +51,9 @@ func InitDB(cfg *config.DatabaseConfig) (*gorm.DB, error) {
 	if err := MigrateNotification(db); err != nil {
 		return nil, err
 	}
+	if err := MigrateRenewalLog(db); err != nil {
+		return nil, err
+	}
 
 	// Initialize default settings
 	if err := InitDefaultSettings(db); err != nil {
