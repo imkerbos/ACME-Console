@@ -36,6 +36,26 @@
       <form @submit.prevent="handleSubmit" class="create-form">
         <div class="form-section">
           <label class="form-label">
+            <span class="label-text">{{ $t('certificate.name') }}</span>
+          </label>
+          <input
+            v-model="certName"
+            type="text"
+            class="form-input"
+            :placeholder="$t('certificate.namePlaceholder')"
+            maxlength="255"
+          />
+          <p class="form-hint">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <path d="M12 16v-4M12 8h.01"/>
+            </svg>
+            {{ $t('certificate.nameHint') }}
+          </p>
+        </div>
+
+        <div class="form-section">
+          <label class="form-label">
             <span class="label-text">{{ $t('certificate.domains') }}</span>
             <span class="label-required">*</span>
           </label>
@@ -190,6 +210,7 @@ const router = useRouter()
 const { t } = useI18n()
 const { getUser } = useAuth()
 
+const certName = ref('')
 const domainsText = ref('')
 const email = ref('')
 const keyType = ref('RSA')
@@ -241,6 +262,7 @@ async function handleSubmit() {
 
   try {
     const payload = {
+      name: certName.value || undefined,
       domains,
       email: email.value,
       key_type: keyType.value,

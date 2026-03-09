@@ -43,8 +43,12 @@
               </svg>
             </div>
             <div class="header-info">
-              <h1>{{ $t('certificate.certificateId', { id }) }}</h1>
+              <h1>
+                {{ certificate.name || $t('certificate.certificateId', { id }) }}
+              </h1>
               <div class="header-meta">
+                <span v-if="certificate.name" class="cert-id-label">#{{ id }}</span>
+                <span v-if="certificate.name" class="meta-divider"></span>
                 <span :class="['status-badge', `status-${certificate.status}`]">
                   <span class="status-dot"></span>
                   {{ $t(`certificate.${certificate.status}`) }}

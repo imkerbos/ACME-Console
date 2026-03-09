@@ -51,6 +51,7 @@
         <thead>
           <tr>
             <th>ID</th>
+            <th>{{ $t('certificate.name') }}</th>
             <th>{{ $t('certificate.domains') }}</th>
             <th>{{ $t('certificate.keyType') }}</th>
             <th>{{ $t('certificate.status') }}</th>
@@ -62,6 +63,7 @@
         <tbody>
           <tr v-for="cert in filteredCertificates" :key="cert.id">
             <td class="cell-id">#{{ cert.id }}</td>
+            <td class="cell-name">{{ cert.name || '-' }}</td>
             <td>
               <div class="domain-list">
                 <span v-for="domain in parseDomains(cert.domains).slice(0, 2)" :key="domain" class="domain-tag">

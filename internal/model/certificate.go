@@ -43,6 +43,7 @@ type Certificate struct {
 	AccountID     *uint             `gorm:"index" json:"account_id,omitempty"`       // Foreign key to ACMEAccount
 	WorkspaceID   *uint             `gorm:"index" json:"workspace_id,omitempty"`     // Foreign key to Workspace (NULL=private)
 	CreatedBy     *uint             `gorm:"index" json:"created_by,omitempty"`       // User who created this certificate (NULL for legacy certs)
+	Name          string            `gorm:"type:varchar(255)" json:"name,omitempty"` // Optional display name
 	Email         string            `gorm:"type:varchar(255)" json:"email,omitempty"` // 申请人邮箱
 	Domains       string            `gorm:"type:json;not null" json:"domains"`       // JSON array: ["example.com", "*.example.com"]
 	KeyType       KeyType           `gorm:"type:varchar(10);not null" json:"key_type"`

@@ -38,6 +38,7 @@ func NewCertificateServiceWithLego(db *gorm.DB, legoSvc *LegoService) *Certifica
 }
 
 type CreateCertificateRequest struct {
+	Name        string   `json:"name,omitempty"`                                                     // 可选，显示名称
 	Domains     []string `json:"domains" binding:"required,min=1"`
 	Email       string   `json:"email" binding:"required,email"`                                     // 申请人邮箱
 	KeyType     string   `json:"key_type" binding:"omitempty,oneof=RSA ECC"`                         // 可选，默认 RSA
@@ -147,6 +148,7 @@ func (s *CertificateService) createSingleCert(req *CreateCertificateRequest, use
 
 	createdByID := userID
 	cert := &model.Certificate{
+		Name:        req.Name,
 		Email:       req.Email,
 		Domains:     string(domainsJSON),
 		KeyType:     model.KeyType(req.KeyType),
