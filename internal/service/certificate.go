@@ -52,6 +52,13 @@ type CreateCertificateResponse struct {
 	Mode         string              `json:"mode"`
 	Certificate  *model.Certificate  `json:"certificate,omitempty"`
 	Certificates []model.Certificate `json:"certificates,omitempty"`
+	Errors       []DomainGroupError  `json:"errors,omitempty"` // Independent mode: per-group errors
+}
+
+// DomainGroupError records a failure for one domain group in independent mode.
+type DomainGroupError struct {
+	Domains []string `json:"domains"`
+	Error   string   `json:"error"`
 }
 
 type CertificateResponse struct {
@@ -109,22 +116,34 @@ func (s *CertificateService) createCombined(req *CreateCertificateRequest, userI
 }
 
 // createIndependent creates one certificate per domain group (root+wildcard merged).
+// It continues processing remaining groups even if some fail, and reports per-group errors.
 func (s *CertificateService) createIndependent(req *CreateCertificateRequest, userID uint) (*CreateCertificateResponse, error) {
 	allDomains := normalizeDomains(req.Domains)
 	groups := groupDomainsForIndependent(allDomains)
 
 	var certs []model.Certificate
+	var errs []DomainGroupError
 	for _, group := range groups {
 		cert, err := s.createSingleCert(req, userID, group, model.IssueModeIndependent)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create certificate for %v: %w", group, err)
+			errs = append(errs, DomainGroupError{
+				Domains: group,
+				Error:   err.Error(),
+			})
+			continue
 		}
 		certs = append(certs, *cert)
+	}
+
+	// All groups failed
+	if len(certs) == 0 && len(errs) > 0 {
+		return nil, fmt.Errorf("all domain groups failed to create certificates")
 	}
 
 	return &CreateCertificateResponse{
 		Mode:         string(model.IssueModeIndependent),
 		Certificates: certs,
+		Errors:       errs,
 	}, nil
 }
 

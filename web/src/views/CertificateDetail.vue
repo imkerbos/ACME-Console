@@ -247,7 +247,7 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
               </svg>
-              <span>部分 DNS 记录未正确配置，请检查后重试。</span>
+              <span>部分 DNS 记录未正确配置，继续验证可能导致签发失败。建议检查并修正后重试。</span>
             </div>
 
             <div class="dns-check-list">
@@ -289,8 +289,11 @@
             <button class="btn btn-secondary" @click="showDNSCheckModal = false">
               关闭
             </button>
-            <button v-if="allDNSMatched" class="btn btn-primary" @click="showDNSCheckModal = false; handleVerify()">
-              验证并签发
+            <button v-if="!allDNSMatched && !forceVerifyConfirmed" class="btn btn-warning" @click="forceVerifyConfirmed = true">
+              仍然继续验证
+            </button>
+            <button v-if="allDNSMatched || forceVerifyConfirmed" class="btn btn-primary" @click="showDNSCheckModal = false; forceVerifyConfirmed = false; handleVerify()">
+              {{ forceVerifyConfirmed ? '确认验证并签发' : '验证并签发' }}
             </button>
           </div>
         </div>
@@ -395,6 +398,7 @@ const verifying = ref(false)
 const checking = ref(false)
 const dnsCheckResults = ref(null)
 const showDNSCheckModal = ref(false)
+const forceVerifyConfirmed = ref(false)
 const togglingRenew = ref(false)
 const renewingNow = ref(false)
 const renewBeforeDays = ref(30)
@@ -469,6 +473,7 @@ async function handlePreVerify() {
   try {
     const response = await certificateApi.preVerify(id)
     dnsCheckResults.value = response.data.results || []
+    forceVerifyConfirmed.value = false
     showDNSCheckModal.value = true
   } catch (e) {
     error.value = e.message
@@ -1201,6 +1206,15 @@ onMounted(async () => {
 .btn-secondary:hover {
   background: #F9FAFB;
   border-color: #D1D5DB;
+}
+
+.btn-warning {
+  background: #F59E0B;
+  color: white;
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: #D97706;
 }
 
 .btn-sm {

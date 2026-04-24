@@ -1,6 +1,6 @@
 .PHONY: build run test clean tidy fmt lint \
         web-install web-dev web-build run-with-web \
-        dev dev-d dev-down dev-logs dev-logs-backend dev-logs-frontend dev-rebuild \
+        dev-docker-up dev-docker-up-d dev-docker-down dev-docker-logs dev-docker-logs-backend dev-docker-logs-frontend dev-docker-rebuild \
         prod-up prod-down prod-logs prod-logs-backend prod-logs-frontend prod-restart \
         prod-update-frontend prod-update-backend prod-ps
 
@@ -66,31 +66,31 @@ all: fmt tidy test build
 # =============================================================================
 
 # Start development environment (backend with air + frontend with vite)
-dev:
+dev-docker-up:
 	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml up --build
 
 # Start in detached mode
-dev-d:
+dev-docker-up-d:
 	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml up --build -d
 
 # Stop development environment
-dev-down:
+dev-docker-down:
 	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml down
 
 # View logs
-dev-logs:
+dev-docker-logs:
 	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml logs -f
 
 # View backend logs only
-dev-logs-backend:
+dev-docker-logs-backend:
 	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml logs -f backend
 
 # View frontend logs only
-dev-logs-frontend:
+dev-docker-logs-frontend:
 	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml logs -f frontend
 
 # Rebuild and restart
-dev-rebuild:
+dev-docker-rebuild:
 	docker compose -f $(DEPLOY_DIR)/dev/docker-compose.yaml up --build --force-recreate
 
 # =============================================================================
