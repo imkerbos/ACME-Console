@@ -1,0 +1,66 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+build/
+
+# Test binary
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage.html
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config files with secrets
+configs/config.yaml
+configs/config.dev.yaml
+configs/config.local.yaml
+deploy/configs/config.yaml
+*.local.yaml
+
+# Claude Code
+CLAUDE.md
+.claude/
+
+# Dev tool config
+.air.toml
+
+# Backup files
+*.backup
+
+# Logs
+*.log
+logs/
+build-errors.log
+
+# Temporary files
+tmp/
+temp/
+
+# Deploy runtime data
+deploy/data/
+deploy/certs/
+deploy/nginx.conf
+deploy/.env
+
+# Frontend
+web/node_modules/
+web/dist/
+web/.vite/

@@ -1,0 +1,264 @@
+import axios from 'axios'
+
+const api = axios.create({
+  baseURL: '/api/v1',
+  timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+})
+
+// Request interceptor - add token
+api.interceptors.request.use(
+  config => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  error => Promise.reject(error)
+)
+
+// Response interceptor
+api.interceptors.response.use(
+  response => response.data,
+  error => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('user')
+      window.location.href = '/login'
+    }
+    const message = error.response?.data?.message || error.message || 'Request failed'
+    return Promise.reject(new Error(message))
+  }
+)
+
+// Auth API
+export const authApi = {
+  login(username, password) {
+    return api.post('/auth/login', { username, password })
+  },
+
+  getCurrentUser() {
+    return api.get('/auth/me')
+  },
+
+  changePassword(oldPassword, newPassword) {
+    return api.post('/auth/change-password', {
+      old_password: oldPassword,
+      new_password: newPassword
+    })
+  },
+
+  updateProfile(data) {
+    return api.put('/auth/profile', data)
+  }
+}
+
+// User API (admin only)
+export const userApi = {
+  list(params = {}) {
+    return api.get('/admin/users', { params })
+  },
+
+  get(id) {
+    return api.get(`/admin/users/${id}`)
+  },
+
+  create(data) {
+    return api.post('/admin/users', data)
+  },
+
+  update(id, data) {
+    return api.put(`/admin/users/${id}`, data)
+  },
+
+  delete(id) {
+    return api.delete(`/admin/users/${id}`)
+  },
+
+  resetPassword(id, password) {
+    return api.post(`/admin/users/${id}/reset-password`, { password })
+  }
+}
+
+// Certificate API
+export const certificateApi = {
+  list(params = {}) {
+    return api.get('/certificates', { params })
+  },
+
+  get(id) {
+    return api.get(`/certificates/${id}`)
+  },
+
+  create(data) {
+    const domainCount = data.domains?.length || 1
+    const isIndependent = data.issue_mode === 'independent'
+    // independent: 基础 10s + 每个域名 2000ms，最多 300s
+    // combined:    基础 10s + 每个域名 500ms，最多 180s
+    const perDomain = isIndependent ? 2000 : 500
+    const maxTimeout = isIndependent ? 300000 : 180000
+    const timeout = Math.min(Math.max(10000, 10000 + domainCount * perDomain), maxTimeout)
+    return api.post('/certificates', data, { timeout })
+  },
+
+  delete(id) {
+    return api.delete(`/certificates/${id}`)
+  },
+
+  verify(id) {
+    // 多域名证书验证可能需要较长时间，设置 5 分钟超时
+    return api.post(`/certificates/${id}/verify`, {}, { timeout: 300000 })
+  },
+
+  preVerify(id) {
+    // 多域名 DNS 检查需要更多时间
+    return api.post(`/certificates/${id}/pre-verify`, {}, { timeout: 60000 })
+  },
+
+  download(id, format = 'zip', password = '') {
+    const params = { format }
+    if (password) params.password = password
+
+    // Create a new axios instance without response interceptor for blob downloads
+    const downloadApi = axios.create({
+      baseURL: '/api/v1',
+      timeout: 30000,
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    })
+
+    // Add auth token
+    downloadApi.interceptors.request.use(config => {
+      const token = localStorage.getItem('token')
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`
+      }
+      return config
+    })
+
+    return downloadApi.get(`/certificates/${id}/download`, {
+      params,
+      responseType: 'blob'
+    })
+  },
+
+  getChallenges(id) {
+    return api.get(`/certificates/${id}/challenges`)
+  },
+
+  exportChallenges(id) {
+    return api.get(`/certificates/${id}/challenges/export`, {
+      responseType: 'text'
+    })
+  },
+
+  enableAutoRenew(id, enabled, renewBeforeDays) {
+    return api.put(`/certificates/${id}/auto-renew`, {
+      enabled,
+      renew_before_days: renewBeforeDays
+    })
+  },
+
+  triggerRenewal(id) {
+    return api.post(`/certificates/${id}/renew`)
+  },
+
+  getRenewalLogs(id, limit = 50) {
+    return api.get(`/certificates/${id}/renewal-logs`, { params: { limit } })
+  },
+
+  retry(id) {
+    return api.post(`/certificates/${id}/retry`, {}, { timeout: 180000 })
+  },
+
+  revoke(id) {
+    return api.post(`/certificates/${id}/revoke`, {}, { timeout: 60000 })
+  }
+}
+
+// Workspace API
+export const workspaceApi = {
+  list() {
+    return api.get('/workspaces')
+  },
+
+  get(id) {
+    return api.get(`/workspaces/${id}`)
+  },
+
+  create(data) {
+    return api.post('/workspaces', data)
+  },
+
+  update(id, data) {
+    return api.put(`/workspaces/${id}`, data)
+  },
+
+  delete(id) {
+    return api.delete(`/workspaces/${id}`)
+  },
+
+  listMembers(id) {
+    return api.get(`/workspaces/${id}/members`)
+  },
+
+  addMember(id, data) {
+    return api.post(`/workspaces/${id}/members`, data)
+  },
+
+  updateMember(id, userId, data) {
+    return api.put(`/workspaces/${id}/members/${userId}`, data)
+  },
+
+  removeMember(id, userId) {
+    return api.delete(`/workspaces/${id}/members/${userId}`)
+  }
+}
+
+// Settings API (admin only)
+export const settingApi = {
+  getSite() {
+    return api.get('/settings/site')
+  },
+
+  updateSite(data) {
+    return api.put('/admin/settings/site', data)
+  }
+}
+
+// Notification API
+export const notificationApi = {
+  list(params = {}) {
+    return api.get('/notifications', { params })
+  },
+
+  get(id) {
+    return api.get(`/notifications/${id}`)
+  },
+
+  create(data) {
+    return api.post('/notifications', data)
+  },
+
+  update(id, data) {
+    return api.put(`/notifications/${id}`, data)
+  },
+
+  delete(id) {
+    return api.delete(`/notifications/${id}`)
+  },
+
+  test(id) {
+    return api.post(`/notifications/${id}/test`)
+  },
+
+  getLogs(certId, limit = 50) {
+    return api.get(`/certificates/${certId}/notification-logs`, { params: { limit } })
+  }
+}
+
+export default api

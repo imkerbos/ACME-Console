@@ -1,0 +1,665 @@
+package service
+
+import (
+	"archive/zip"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/imkerbos/ACME-Console/internal/model"
+	"github.com/imkerbos/ACME-Console/internal/pagination"
+	"gorm.io/gorm"
+)
+
+type CertificateService struct {
+	db       *gorm.DB
+	acmeSvc  *AcmeShService  // Legacy mock service (deprecated)
+	legoSvc  *LegoService    // Real ACME service
+	useLego  bool            // Whether to use real ACME (lego) or mock
+}
+
+func NewCertificateService(db *gorm.DB, acmeSvc *AcmeShService) *CertificateService {
+	return &CertificateService{
+		db:      db,
+		acmeSvc: acmeSvc,
+		useLego: false,
+	}
+}
+
+// NewCertificateServiceWithLego creates a CertificateService with real ACME support
+func NewCertificateServiceWithLego(db *gorm.DB, legoSvc *LegoService) *CertificateService {
+	return &CertificateService{
+		db:      db,
+		legoSvc: legoSvc,
+		useLego: true,
+	}
+}
+
+type CreateCertificateRequest struct {
+	Name          string   `json:"name,omitempty"`                                                     // 可选，显示名称
+	Domains       []string `json:"domains" binding:"required,min=1"`
+	Email         string   `json:"email" binding:"required,email"`                                     // 申请人邮箱
+	KeyType       string   `json:"key_type" binding:"omitempty,oneof=RSA ECC"`                         // 可选，默认 RSA
+	KeySize       int      `json:"key_size,omitempty"`                                                 // 可选，根据 KeyType 自动设置
+	WorkspaceID   *uint    `json:"workspace_id,omitempty"`                                             // 可选，NULL=私有证书
+	IssueMode     string   `json:"issue_mode" binding:"omitempty,oneof=combined independent"`          // 签发模式
+	ChallengeType string   `json:"challenge_type" binding:"omitempty,oneof=dns-01 http-01"`            // 验证方式，默认 dns-01
+	CAEnv         string   `json:"ca_env" binding:"omitempty,oneof=production staging"`                // CA 环境，默认 production
+}
+
+// CreateCertificateResponse wraps the result of Create() for both combined and independent modes.
+type CreateCertificateResponse struct {
+	Mode         string              `json:"mode"`
+	Certificate  *model.Certificate  `json:"certificate,omitempty"`
+	Certificates []model.Certificate `json:"certificates,omitempty"`
+	Errors       []DomainGroupError  `json:"errors,omitempty"` // Independent mode: per-group errors
+}
+
+// DomainGroupError records a failure for one domain group in independent mode.
+type DomainGroupError struct {
+	Domains []string `json:"domains"`
+	Error   string   `json:"error"`
+}
+
+type CertificateResponse struct {
+	ID         uint                `json:"id"`
+	Domains    []string            `json:"domains"`
+	KeyType    string              `json:"key_type"`
+	Status     string              `json:"status"`
+	IssuedAt   *string             `json:"issued_at,omitempty"`
+	ExpiresAt  *string             `json:"expires_at,omitempty"`
+	CreatedAt  string              `json:"created_at"`
+	Challenges []ChallengeResponse `json:"challenges,omitempty"`
+}
+
+type ChallengeResponse struct {
+	ID       uint   `json:"id"`
+	Domain   string `json:"domain"`
+	TXTHost  string `json:"txt_host"`
+	TXTValue string `json:"txt_value"`
+	Status   string `json:"status"`
+}
+
+func (s *CertificateService) Create(req *CreateCertificateRequest, userID uint) (*CreateCertificateResponse, error) {
+	// 设置默认值
+	if req.KeyType == "" {
+		req.KeyType = "RSA"
+	}
+	if req.KeySize == 0 {
+		if req.KeyType == "ECC" {
+			req.KeySize = 256
+		} else {
+			req.KeySize = 2048
+		}
+	}
+	if req.IssueMode == "" {
+		req.IssueMode = string(model.IssueModeCombined)
+	}
+	if req.ChallengeType == "" {
+		req.ChallengeType = string(model.ChallengeTypeDNS01)
+	}
+	if req.CAEnv == "" {
+		req.CAEnv = string(model.CAEnvProduction)
+	}
+
+	// Wildcard domains can only use DNS-01
+	if req.ChallengeType == string(model.ChallengeTypeHTTP01) {
+		for _, d := range req.Domains {
+			if strings.HasPrefix(d, "*.") {
+				return nil, fmt.Errorf("wildcard domain %s only supports DNS-01 challenge type", d)
+			}
+		}
+	}
+
+	if req.IssueMode == string(model.IssueModeIndependent) {
+		return s.createIndependent(req, userID)
+	}
+	return s.createCombined(req, userID)
+}
+
+// createCombined creates a single SAN certificate covering all domains.
+func (s *CertificateService) createCombined(req *CreateCertificateRequest, userID uint) (*CreateCertificateResponse, error) {
+	domains := normalizeDomains(req.Domains)
+	cert, err := s.createSingleCert(req, userID, domains, model.IssueModeCombined)
+	if err != nil {
+		return nil, err
+	}
+	return &CreateCertificateResponse{
+		Mode:        string(model.IssueModeCombined),
+		Certificate: cert,
+	}, nil
+}
+
+// createIndependent creates one certificate per domain group (root+wildcard merged).
+// It continues processing remaining groups even if some fail, and reports per-group errors.
+func (s *CertificateService) createIndependent(req *CreateCertificateRequest, userID uint) (*CreateCertificateResponse, error) {
+	allDomains := normalizeDomains(req.Domains)
+	groups := groupDomainsForIndependent(allDomains)
+
+	var certs []model.Certificate
+	var errs []DomainGroupError
+	for _, group := range groups {
+		cert, err := s.createSingleCert(req, userID, group, model.IssueModeIndependent)
+		if err != nil {
+			errs = append(errs, DomainGroupError{
+				Domains: group,
+				Error:   err.Error(),
+			})
+			continue
+		}
+		certs = append(certs, *cert)
+	}
+
+	// All groups failed
+	if len(certs) == 0 && len(errs) > 0 {
+		return nil, fmt.Errorf("all domain groups failed to create certificates")
+	}
+
+	return &CreateCertificateResponse{
+		Mode:         string(model.IssueModeIndependent),
+		Certificates: certs,
+		Errors:       errs,
+	}, nil
+}
+
+// groupDomainsForIndependent splits domains into groups using mergeDomainsForZip logic.
+// Each group becomes an independent certificate.
+func groupDomainsForIndependent(domains []string) [][]string {
+	entries := mergeDomainsForZip(domains)
+	groups := make([][]string, len(entries))
+	for i, entry := range entries {
+		groups[i] = entry.Domains
+	}
+	return groups
+}
+
+// createSingleCert creates one certificate record with the given domains.
+func (s *CertificateService) createSingleCert(req *CreateCertificateRequest, userID uint, domains []string, issueMode model.IssueMode) (*model.Certificate, error) {
+	domainsJSON, err := json.Marshal(domains)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal domains: %w", err)
+	}
+
+	createdByID := userID
+	cert := &model.Certificate{
+		Name:          req.Name,
+		Email:         req.Email,
+		Domains:       string(domainsJSON),
+		KeyType:       model.KeyType(req.KeyType),
+		KeySize:       req.KeySize,
+		IssueMode:     issueMode,
+		ChallengeMode: model.ChallengeType(req.ChallengeType),
+		CAEnv:         model.CAEnvironment(req.CAEnv),
+		Status:        model.CertificateStatusPending,
+		WorkspaceID:   req.WorkspaceID,
+		CreatedBy:     &createdByID,
+	}
+
+	if err := s.db.Create(cert).Error; err != nil {
+		return nil, fmt.Errorf("failed to create certificate: %w", err)
+	}
+
+	if s.useLego && s.legoSvc != nil {
+		if err := s.legoSvc.CreateOrderWithOptions(cert.ID, req.Email, domains, req.KeyType, req.KeySize, req.ChallengeType, req.CAEnv); err != nil {
+			if reloadErr := s.db.Preload("Challenges").First(cert, cert.ID).Error; reloadErr != nil {
+				return nil, fmt.Errorf("failed to create ACME order: %w", err)
+			}
+			if len(cert.Challenges) > 0 {
+				return cert, nil
+			}
+			return nil, fmt.Errorf("failed to create ACME order: %w", err)
+		}
+	} else {
+		challenges, err := s.acmeSvc.GenerateChallenges(cert.ID, domains)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate challenges: %w", err)
+		}
+		for _, ch := range challenges {
+			if err := s.db.Create(&ch).Error; err != nil {
+				return nil, fmt.Errorf("failed to create challenge: %w", err)
+			}
+		}
+	}
+
+	if err := s.db.Preload("Challenges").First(cert, cert.ID).Error; err != nil {
+		return nil, err
+	}
+
+	return cert, nil
+}
+
+func (s *CertificateService) List() ([]model.Certificate, error) {
+	var certs []model.Certificate
+	if err := s.db.Preload("Challenges").Order("created_at DESC").Find(&certs).Error; err != nil {
+		return nil, err
+	}
+	return certs, nil
+}
+
+func (s *CertificateService) ListPaginated(params pagination.Params) (*pagination.Result[model.Certificate], error) {
+	var certs []model.Certificate
+	var total int64
+
+	// Count total
+	if err := s.db.Model(&model.Certificate{}).Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	// Get paginated records
+	if err := s.db.Preload("Challenges").
+		Order("created_at DESC").
+		Offset(params.Offset()).
+		Limit(params.Limit()).
+		Find(&certs).Error; err != nil {
+		return nil, err
+	}
+
+	result := pagination.NewResult(certs, total, params)
+	return &result, nil
+}
+
+// ListPaginatedWithFilter lists certificates with workspace and user filtering
+func (s *CertificateService) ListPaginatedWithFilter(params pagination.Params, userID uint, workspaceID *uint) (*pagination.Result[model.Certificate], error) {
+	var certs []model.Certificate
+	var total int64
+
+	query := s.db.Model(&model.Certificate{})
+
+	// Apply filters
+	if workspaceID != nil {
+		// Filter by workspace
+		query = query.Where("workspace_id = ?", *workspaceID)
+	} else {
+		// Show private certificates (created by user) and workspace certificates (user is member)
+		// Get user's workspace IDs
+		var memberWorkspaceIDs []uint
+		s.db.Model(&model.WorkspaceMember{}).
+			Where("user_id = ?", userID).
+			Pluck("workspace_id", &memberWorkspaceIDs)
+
+		if len(memberWorkspaceIDs) > 0 {
+			// Private certificates OR workspace certificates user has access to
+			query = query.Where("(workspace_id IS NULL AND created_by = ?) OR workspace_id IN ?", userID, memberWorkspaceIDs)
+		} else {
+			// Only private certificates
+			query = query.Where("workspace_id IS NULL AND created_by = ?", userID)
+		}
+	}
+
+	// Count total
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	// Get paginated records
+	if err := query.Preload("Challenges").
+		Order("created_at DESC").
+		Offset(params.Offset()).
+		Limit(params.Limit()).
+		Find(&certs).Error; err != nil {
+		return nil, err
+	}
+
+	result := pagination.NewResult(certs, total, params)
+	return &result, nil
+}
+
+func (s *CertificateService) GetByID(id uint) (*model.Certificate, error) {
+	var cert model.Certificate
+	if err := s.db.Preload("Challenges").First(&cert, id).Error; err != nil {
+		return nil, err
+	}
+	return &cert, nil
+}
+
+func (s *CertificateService) Verify(id uint) (*model.Certificate, error) {
+	cert, err := s.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if s.useLego && s.legoSvc != nil {
+		// Check if order has expired before attempting verification
+		if cert.OrderExpiresAt != nil && time.Now().After(*cert.OrderExpiresAt) {
+			cert.Status = model.CertificateStatusFailed
+			cert.ErrorMessage = "ACME order has expired. Please click Retry to create a new order."
+			s.db.Model(cert).Updates(map[string]any{
+				"status":        model.CertificateStatusFailed,
+				"error_message": cert.ErrorMessage,
+			})
+			return cert, fmt.Errorf("order has expired, please retry to create a new order")
+		}
+
+		// Use real ACME verification
+		if err := s.legoSvc.FinalizeOrder(id); err != nil {
+			// Reload to get the error_message set by FinalizeOrder
+			return s.GetByID(id)
+		}
+		// Reload to get updated status
+		return s.GetByID(id)
+	}
+
+	// Mock verification (legacy behavior)
+	verified, err := s.acmeSvc.VerifyChallenges(cert)
+	if err != nil {
+		return nil, err
+	}
+
+	if verified {
+		now := time.Now()
+		expiresAt := now.AddDate(0, 3, 0) // Mock: 3 months validity
+
+		cert.Status = model.CertificateStatusReady
+		cert.IssuedAt = &now
+		cert.ExpiresAt = &expiresAt
+
+		// Update all challenges to verified
+		for i := range cert.Challenges {
+			cert.Challenges[i].Status = model.ChallengeStatusVerified
+			s.db.Save(&cert.Challenges[i])
+		}
+	} else {
+		cert.Status = model.CertificateStatusFailed
+	}
+
+	if err := s.db.Save(cert).Error; err != nil {
+		return nil, err
+	}
+
+	return cert, nil
+}
+
+// RetryVerification re-creates the ACME order for a failed certificate.
+// This generates new challenges so the user can set up DNS/HTTP validation again.
+func (s *CertificateService) RetryVerification(id uint) (*model.Certificate, error) {
+	cert, err := s.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if cert.Status != model.CertificateStatusFailed {
+		return nil, fmt.Errorf("only failed certificates can be retried")
+	}
+
+	if !s.useLego || s.legoSvc == nil {
+		return nil, fmt.Errorf("lego service not available")
+	}
+
+	// Re-create the ACME order with new challenges
+	if err := s.legoSvc.RetryOrder(id); err != nil {
+		return nil, fmt.Errorf("retry failed: %w", err)
+	}
+
+	// Reload and return
+	return s.GetByID(id)
+}
+
+// RevokeCertificate revokes a certificate with the CA.
+func (s *CertificateService) RevokeCertificate(id uint) error {
+	if !s.useLego || s.legoSvc == nil {
+		return fmt.Errorf("lego service not available")
+	}
+
+	return s.legoSvc.RevokeCertificate(id)
+}
+
+func (s *CertificateService) GetChallenges(certID uint) ([]model.Challenge, error) {
+	var challenges []model.Challenge
+	if err := s.db.Where("certificate_id = ?", certID).Find(&challenges).Error; err != nil {
+		return nil, err
+	}
+	return challenges, nil
+}
+
+func (s *CertificateService) ExportChallenges(certID uint) (string, error) {
+	challenges, err := s.GetChallenges(certID)
+	if err != nil {
+		return "", err
+	}
+
+	return s.acmeSvc.ExportTXTTemplate(challenges), nil
+}
+
+// PreVerifyDNS checks if DNS TXT records are correctly set up
+func (s *CertificateService) PreVerifyDNS(certID uint) ([]DNSCheckResult, bool, error) {
+	if s.legoSvc == nil {
+		return nil, false, fmt.Errorf("lego service not configured")
+	}
+
+	results, allOK, err := s.legoSvc.PreVerifyDNS(certID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// Convert to our response type
+	dnsResults := make([]DNSCheckResult, len(results))
+	for i, r := range results {
+		dnsResults[i] = DNSCheckResult{
+			Domain:        r.Domain,
+			TXTHost:       r.TXTHost,
+			ExpectedValue: r.ExpectedValue,
+			FoundValues:   r.FoundValues,
+			Matched:       r.Matched,
+			Error:         r.Error,
+		}
+	}
+
+	return dnsResults, allOK, nil
+}
+
+// DNSCheckResult represents the result of a DNS check
+type DNSCheckResult struct {
+	Domain        string   `json:"domain"`
+	TXTHost       string   `json:"txt_host"`
+	ExpectedValue string   `json:"expected_value"`
+	FoundValues   []string `json:"found_values"`
+	Matched       bool     `json:"matched"`
+	Error         string   `json:"error,omitempty"`
+}
+
+// GetCertificateBundle returns the certificate in the specified format
+func (s *CertificateService) GetCertificateBundle(certID uint, format, password string) ([]byte, string, error) {
+	if s.legoSvc != nil {
+		return s.legoSvc.GetCertificateBundle(certID, DownloadFormat(format), password)
+	}
+
+	// Mock mode: return mock certificate bundle
+	return s.getMockCertificateBundle(certID, format)
+}
+
+// getMockCertificateBundle generates a mock certificate bundle for testing
+func (s *CertificateService) getMockCertificateBundle(certID uint, format string) ([]byte, string, error) {
+	var cert model.Certificate
+	if err := s.db.First(&cert, certID).Error; err != nil {
+		return nil, "", fmt.Errorf("certificate not found: %w", err)
+	}
+
+	if cert.Status != model.CertificateStatusReady {
+		return nil, "", fmt.Errorf("certificate is not ready")
+	}
+
+	// Parse domains
+	var domains []string
+	if err := json.Unmarshal([]byte(cert.Domains), &domains); err != nil {
+		domains = []string{"example.com"}
+	}
+
+	// Generate mock certificate content (include all domains)
+	mockCert := fmt.Sprintf(`-----BEGIN CERTIFICATE-----
+MOCK CERTIFICATE FOR TESTING
+Domains: %s
+Key Type: %s
+Status: %s
+Created: %s
+-----END CERTIFICATE-----
+`, strings.Join(domains, ", "), cert.KeyType, cert.Status, cert.CreatedAt.Format(time.RFC3339))
+
+	mockKey := `-----BEGIN PRIVATE KEY-----
+MOCK PRIVATE KEY FOR TESTING
+This is a mock certificate generated for testing purposes.
+Do not use in production.
+-----END PRIVATE KEY-----
+`
+
+	switch format {
+	case "pem":
+		return []byte(mockCert), "certificate.pem", nil
+
+	case "fullchain":
+		return []byte(mockCert), "fullchain.pem", nil
+
+	case "zip":
+		// For a combined (SAN) certificate, use a single directory
+		entries := mergeDomainsForZip(domains)
+		dirName := "certificate"
+		if len(entries) > 0 {
+			dirName = entries[0].DirName
+		}
+
+		var buf bytes.Buffer
+		w := zip.NewWriter(&buf)
+
+		certFile, _ := w.Create(dirName + "/certificate.pem")
+		certFile.Write([]byte(mockCert))
+
+		chainFile, _ := w.Create(dirName + "/fullchain.pem")
+		chainFile.Write([]byte(mockCert))
+
+		keyFile, _ := w.Create(dirName + "/private.key")
+		keyFile.Write([]byte(mockKey))
+
+		readmeFile, _ := w.Create("README.txt")
+		readmeFile.Write([]byte(fmt.Sprintf(`MOCK CERTIFICATE BUNDLE
+
+This is a mock certificate bundle for testing purposes.
+To use real certificates, configure ACME settings in the admin panel.
+
+Domains: %s (1 directory: %s/)
+
+Directory contains:
+- certificate.pem: Certificate file
+- fullchain.pem: Full certificate chain
+- private.key: Private key file
+`, strings.Join(domains, ", "), dirName)))
+
+		w.Close()
+		return buf.Bytes(), "certificate.zip", nil
+
+	default:
+		return nil, "", fmt.Errorf("unsupported format: %s", format)
+	}
+}
+
+// normalizeDomains 规范化域名列表
+// - 通配符域名 *.example.com 自动添加根域名 example.com
+// - 去重并保持顺序（根域名放在通配符前面）
+func normalizeDomains(domains []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+
+	// 第一遍：收集所有需要添加的根域名
+	var rootsToAdd []string
+	for _, domain := range domains {
+		if strings.HasPrefix(domain, "*.") {
+			rootDomain := strings.TrimPrefix(domain, "*.")
+			if !seen[rootDomain] {
+				// 检查用户是否已经手动添加了根域名
+				hasRoot := false
+				for _, d := range domains {
+					if d == rootDomain {
+						hasRoot = true
+						break
+					}
+				}
+				if !hasRoot {
+					rootsToAdd = append(rootsToAdd, rootDomain)
+					seen[rootDomain] = true
+				}
+			}
+		}
+	}
+
+	// 第二遍：构建最终列表（根域名在前，保持原顺序）
+	seen = make(map[string]bool) // 重置
+
+	for _, domain := range domains {
+		if seen[domain] {
+			continue
+		}
+
+		// 如果是通配符域名，先添加对应的根域名
+		if strings.HasPrefix(domain, "*.") {
+			rootDomain := strings.TrimPrefix(domain, "*.")
+			if !seen[rootDomain] {
+				result = append(result, rootDomain)
+				seen[rootDomain] = true
+			}
+		}
+
+		result = append(result, domain)
+		seen[domain] = true
+	}
+
+	return result
+}
+
+// Delete deletes a certificate and its associated challenges
+func (s *CertificateService) Delete(id uint) error {
+	// Check if certificate exists
+	var cert model.Certificate
+	if err := s.db.First(&cert, id).Error; err != nil {
+		return fmt.Errorf("certificate not found: %w", err)
+	}
+
+	// Delete associated challenges first (due to foreign key constraint)
+	if err := s.db.Where("certificate_id = ?", id).Delete(&model.Challenge{}).Error; err != nil {
+		return fmt.Errorf("failed to delete challenges: %w", err)
+	}
+
+	// Delete the certificate
+	if err := s.db.Delete(&cert).Error; err != nil {
+		return fmt.Errorf("failed to delete certificate: %w", err)
+	}
+
+	return nil
+}
+
+// EnableAutoRenew toggles auto-renewal for a certificate and sets renew_before_days.
+func (s *CertificateService) EnableAutoRenew(certID uint, enabled bool, days int) error {
+	var cert model.Certificate
+	if err := s.db.First(&cert, certID).Error; err != nil {
+		return fmt.Errorf("certificate not found: %w", err)
+	}
+
+	updates := map[string]any{
+		"auto_renew": enabled,
+	}
+	if days > 0 {
+		updates["renew_before_days"] = days
+	}
+	// Reset renewal status when toggling
+	if enabled && cert.RenewalStatus == model.RenewalStatusCompleted {
+		updates["renewal_status"] = model.RenewalStatusIdle
+	}
+
+	return s.db.Model(&cert).Updates(updates).Error
+}
+
+// GetRenewalLogs returns renewal audit logs for a certificate.
+func (s *CertificateService) GetRenewalLogs(certID uint, limit int) ([]model.RenewalLog, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var logs []model.RenewalLog
+	if err := s.db.Where("certificate_id = ?", certID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&logs).Error; err != nil {
+		return nil, fmt.Errorf("failed to query renewal logs: %w", err)
+	}
+
+	return logs, nil
+}
